@@ -1,0 +1,159 @@
+{
+  "meta": {
+    "title": "Quick Come | Most of the money goes back to players",
+    "description": "Predict NBA, MLB, European football and BTC with USDT. We are never the house: we only take 5% of winners' profit, so about 97.5% of the pool goes back to players. Launching soon - leave your email."
+  },
+  "common": {
+    "retry": "Retry",
+    "home": "Back to home",
+    "loading": "Loading…",
+    "network": "Can't connect right now. Check your network and retry.",
+    "server": "Server error. Please try again later.",
+    "rateLimited": "Too many attempts. Please try again in {minutes} min.",
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "The address may be mistyped, or the page has been removed."
+  },
+  "nav": {
+    "followX": "Follow on X",
+    "followThreads": "Follow on Threads",
+    "lang": "Language"
+  },
+  "env": {
+    "banner": "Test environment: not the real site, please don't leave real data"
+  },
+  "hero": {
+    "eyebrow": "Real-money odds · never the house",
+    "title1": "Most of the money ",
+    "title2": "goes back to players",
+    "sub": "Predict NBA, MLB, European football and BTC moves with USDT. Winners share the losing side's pool in proportion to their stakes; the platform is never your counterparty and only takes 5% of winners' profit.",
+    "cmpLabel": "Return rate comparison",
+    "lottery": "Taiwan Sports Lottery",
+    "us": "Quick Come",
+    "lotteryValue": "≤78%",
+    "usValue": "≈97.5%",
+    "foot": "Return rate = the share of all money staked that goes back to players. The Sports Lottery figure is the legal cap under Article 6 of Taiwan's Sports Lottery Issuance Act; Quick Come assumes stakes split evenly between both sides (about 99% if the favourite wins, about 96% if the underdog wins)."
+  },
+  "form": {
+    "title": "Launching soon - leave your email",
+    "lead": "We send one email when we launch, and nothing else. Unsubscribe any time.",
+    "email": "Email",
+    "placeholder": "you@example.com",
+    "beta": "I would like to join the beta and give feedback (optional)",
+    "submit": "Notify me at launch",
+    "submitting": "Sending…",
+    "small": "You will get a confirmation email. Click the button in it to finish subscribing.",
+    "doneTitle": "Confirmation email sent",
+    "doneBody": "Check your inbox and click the link to finish subscribing. We sent it to {email}; it is valid for 7 days.",
+    "again": "Use a different email",
+    "errRequired": "Please enter your email.",
+    "errEmail": "That email doesn't look right. Write it like you@example.com.",
+    "doneHint": "Nothing arrived? Check your spam folder. You can submit again after 10 minutes."
+  },
+  "matches": {
+    "title": "This week's big games",
+    "lead": "After launch, every game is a pool. Times are Taiwan time (UTC+8).",
+    "empty": "We're still picking this week's games. Updated every Sunday.",
+    "loadError": "Can't load this week's games right now.",
+    "btcLeague": "BTC hourly",
+    "btcTitle": "Up or down in the next hour",
+    "btcPrice": "Now {price} USDT",
+    "btcStats": "Last {hours} hours: up {up}, down {down}",
+    "btcSource": "{source} public data, updated {time}",
+    "btcUnavailable": "BTC data is unavailable right now; it updates automatically.",
+    "upShare": "Up {pct}%",
+    "downShare": "Down {pct}%"
+  },
+  "how": {
+    "title": "How it works",
+    "lead": "Three steps. Money only moves between players.",
+    "s1h": "Pick a side",
+    "s1p": "Back \"Lakers win\" or \"Warriors win\", with any amount you choose.",
+    "s2h": "Winners share the losers' pool",
+    "s2p": "When the result is in, the winning side shares all of the losing side's money in proportion to their stakes.",
+    "s3h": "We only take 5% of winners' profit",
+    "s3p": "The platform is never your counterparty and doesn't care who wins. If nobody backs the other side, everyone is refunded in full.",
+    "calc": "Example: {win} USDT is staked on the Lakers and {lose} USDT on the Warriors, and the Lakers win. The losing {lose} is the winners' profit; the platform takes 5% = {fee}, and winners share {share}. You staked {stake} on the Lakers, so you get back {stake} + {share} × {stake} ÷ {win} = {payout} USDT. Of the whole {total} pool, {back} ({rate}) goes back to players."
+  },
+  "dep": {
+    "title": "Deposit over BEP20 to save fees",
+    "body": "After launch you can deposit USDT on BEP20, TRC20 or ERC20. BEP20 has the lowest transfer fee; avoid TRC20 for small amounts, where the fee can eat up nearly 10%.",
+    "short": "After launch, deposit over BEP20 for the lowest fee; avoid TRC20 for small amounts."
+  },
+  "faq": {
+    "title": "FAQ",
+    "q1": "Why aren't you the house? Where does the money come from?",
+    "a1": "Every game is a pool. Winners share the money staked by the losing side, not the platform's money. We don't care who wins; we only take 5% of winners' profit.",
+    "q2": "What if only one side has bets?",
+    "a2": "If nobody backs the other side, the game is cancelled and everyone is refunded in full, with no fee.",
+    "q3": "Are there withdrawal limits?",
+    "a3": "The minimum withdrawal is 100 USDT, and you need to verify your identity before your first withdrawal. You can keep your balance for future predictions.",
+    "q4": "When do you launch?",
+    "a4": "Soon. Once the date is set, we'll send you a single email.",
+    "q5": "Will you keep sending me ads?",
+    "a5": "No. Apart from the confirmation email, we send one email at launch. Unsubscribe any time."
+  },
+  "footer": {
+    "risk": "Risk warning: predictions can be lost, and a stake on the wrong option is not refunded. Only use money you can afford to lose.",
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "riskLink": "Risk Disclosure",
+    "backup": "Main site down? Backup address:",
+    "x": "X",
+    "threads": "Threads"
+  },
+  "confirm": {
+    "title": "Confirm subscription",
+    "working": "Opening your subscription page…",
+    "missing": "This address is incomplete. Please click the button in the confirmation email."
+  },
+  "sub": {
+    "pageTitle": "My subscription",
+    "opening": "Confirming your subscription…",
+    "okTitle": "You are subscribed",
+    "okBody": "We will send you a single email when we launch.",
+    "okBeta": "You chose to join the beta; we will contact you before it starts.",
+    "depTitle": "Deposit tip",
+    "revisit": "To check your invites later, click the button in the confirmation email again and you will come back to this page. This page is for you only; do not share it.",
+    "unsubOpen": "Do not want the launch email? Unsubscribe",
+    "unsubAsk": "Unsubscribe? You will not get the launch email.",
+    "unsubYes": "Unsubscribe",
+    "unsubNo": "Cancel",
+    "unsubbedTitle": "You have unsubscribed",
+    "unsubbedBody": "We will not email you again. Changed your mind? Use the button below to subscribe again.",
+    "resubscribe": "Subscribe again",
+    "working": "Working…",
+    "expiredTitle": "This link is older than 7 days",
+    "expiredBody": "Use the button below and we will send a new confirmation email. Click the button in it to finish subscribing.",
+    "resend": "Send the confirmation email again",
+    "resent": "Sent. Please click the button in the newest email.",
+    "resendTooSoon": "We just sent one. Please try again in {minutes} min.",
+    "invalidTitle": "This link is not valid",
+    "invalidBody": "Please click the button in the confirmation email. If you cannot find it, leave your email on the home page again and we will send a new one.",
+    "backToForm": "Back to the home page",
+    "missing": "This address is incomplete. Please click the button in the confirmation email."
+  },
+  "invite": {
+    "title": "Invite friends",
+    "lead": "Share your personal invite link with friends; this page shows how many you have invited.",
+    "copy": "Copy link",
+    "copied": "Copied",
+    "copyFail": "Could not copy automatically. Please select the link and copy it.",
+    "count": "You have invited {n}",
+    "countHint": "A friend counts once they leave their email through your link and finish subscribing."
+  },
+  "unsub": {
+    "title": "Unsubscribe from the launch notice",
+    "lead": "Click the button below and we won't email you again.",
+    "button": "Unsubscribe",
+    "working": "Working…",
+    "done": "You are unsubscribed and will not get emails from us.",
+    "missing": "This address is missing its unsubscribe code. Please use the unsubscribe link in the email.",
+    "invalid": "This unsubscribe link is not valid. Please click the button in the confirmation email and unsubscribe on your subscription page.",
+    "again": "Changed your mind? Open my subscription page to subscribe again"
+  },
+  "legal": {
+    "back": "Back to home",
+    "updated": "Updated: {date}",
+    "draft": "This is a pre-launch version and will be updated after legal review before the service opens."
+  }
+}

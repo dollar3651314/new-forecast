@@ -1,0 +1,71 @@
+# Quick Come 官网 / 等候页 / 名单页 v1 的 Cloudflare Worker（Workers 静态资源 + D1 + Cron）。技术方案：agents 产品/forecast/架构方案/v1-官网技术方案.md。
+# 顶层是正式版（new-forecast-site），[env.staging] 是测试版（new-forecast-site-staging）。环境里的绑定、变量、Cron 不继承顶层，每个环境都写全（Cloudflare 规范 K5）。
+# - 密钥不写在这里：RESEND_API_KEY、ADMIN_PASSWORD、ADMIN_PATH（名单页的地址）由 Amos 在控制台 Settings → Variables and Secrets 填（K2）。keep_vars = true：部署时不删控制台里填的。
+# - D1 的 database_id 不写在这里：部署前由 scripts/ensure-d1.mjs 按名字查（没有就建），写进本次部署用的临时配置 wrangler.deploy.toml；本机 wrangler dev 用本地 D1。
+# - 自定义域名（www.quickcome.online）不写在这里：Amos 验收测试版以后在控制台绑，部署令牌因此不需要域名权限。
+# - BACKUP_URL（M-12 备用网址）不写在这里：scripts/deploy.sh 从 wrangler deploy 的输出里取 workers.dev 地址，用 --var 传进去。
+# 参照：forecast main 0caa740 cf/wrangler.toml。
+name = "new-forecast-site"
+main = "worker/src/index.ts"
+compatibility_date = "2026-10-01"
+keep_vars = true
+# M-12：正式版也打开 Cloudflare 免费的 workers.dev 地址，作为主域名打不开时的备用网址
+workers_dev = true
+preview_urls = false
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# 除了 /assets/*（带内容哈希的 JS、CSS）以外都先进 Worker：名单页的地址是密钥 ADMIN_PATH（不写在这里），只有 Worker 知道；
+# 名单页的 HTML 文件 /console.html 也要由 Worker 挡住。代价是每次打开页面多算一次 Worker 请求（免费版每天 10 万次，等候页够用）
+run_worker_first = ["/*", "!/assets/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "new-forecast-site"
+database_id = "local-only"
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "production"
+PUBLIC_BASE_URL = "https://www.quickcome.online"
+MAIL_FROM = "Quick Come <noreply@fc-email.quickcome.online>"
+
+[env.staging]
+name = "new-forecast-site-staging"
+keep_vars = true
+workers_dev = true
+preview_urls = false
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# 测试版整站先进 Worker：给每个回答加 X-Robots-Tag: noindex、/robots.txt 禁止收录（测试版不要被搜索引擎收录）；名单页同正式版（密钥 ADMIN_PATH）。
+# 公开页面不要密码（v1.1 起去掉了整站密码门），只有名单页要密码。
+run_worker_first = true
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "new-forecast-site-staging"
+database_id = "local-only"
+migrations_dir = "migrations"
+
+[env.staging.triggers]
+crons = ["*/5 * * * *"]
+
+[env.staging.observability]
+enabled = true
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+# 测试版的网址：Amos 2026-10-29 要求用 fc-test-www.quickcome.online（在 Cloudflare 控制台把这个自定义域名绑到测试版 Worker）；邮件里的链接按它拼
+PUBLIC_BASE_URL = "https://fc-test-www.quickcome.online"
+MAIL_FROM = "Quick Come <noreply@fc-email.quickcome.online>"

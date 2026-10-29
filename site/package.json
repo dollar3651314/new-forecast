@@ -1,0 +1,41 @@
+{
+  "name": "new-forecast-site",
+  "private": true,
+  "version": "1.1.0",
+  "type": "module",
+  "description": "Quick Come 官网 / 等候页 / 名单页 v1.1：Cloudflare Worker（静态资源 + D1 + Cron）+ Vite React 页面",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "build": "vite build",
+    "check-dist": "node scripts/check-dist.mjs",
+    "dry-run": "wrangler deploy --dry-run --env= --outdir .wrangler/dry-run && wrangler deploy --dry-run --env=staging --outdir .wrangler/dry-run-staging",
+    "dev": "wrangler dev --test-scheduled",
+    "e2e": "node scripts/e2e-local.mjs",
+    "og": "node scripts/render-og.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261006.1",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "22.20.5",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "jsdom": "26.1.0",
+    "playwright": "1.56.1",
+    "typescript": "5.9.3",
+    "vite": "6.4.4",
+    "vitest": "3.2.7",
+    "wrangler": "4.149.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

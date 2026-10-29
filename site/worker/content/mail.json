@@ -1,0 +1,49 @@
+{
+  "_说明": "确认邮件的文字（三种语言，C6：文案不写死在代码里）。邮件里只有一个链接入口：订阅者的专属页面 {page}（按钮 + 按钮打不开时的备用文字链接，同一个地址）。不是正式版时标题前面加 envPrefix（C34）。充值提醒只讲用 BEP20 充值，不点名任何交易所（需求单 v1.2 关卡结论）。HTML 版由 site/worker/src/mail.ts 拼（表格 + 内联样式），纯文本版用同样的文字。site/test/worker/mail.test.ts 检查三种语言的字段齐全。",
+  "envPrefix": {
+    "zh-TW": "[測試環境] ",
+    "zh-CN": "[测试环境] ",
+    "en": "[TEST] "
+  },
+  "confirm": {
+    "zh-TW": {
+      "subject": "請確認訂閱 Quick Come 上線通知",
+      "heading": "還差一步：確認訂閱",
+      "intro": "你在 Quick Come 留下了這個電子信箱。點下面的按鈕，打開頁面就完成訂閱（7 天內有效）。",
+      "button": "確認訂閱",
+      "fallback": "按鈕打不開的話，把這個連結複製到瀏覽器打開：",
+      "page": "這個連結也是你的專屬頁面：之後再打開，就能拿邀請連結、看你邀請了幾個人。請不要轉給別人。",
+      "depositTitle": "充值小提醒",
+      "deposit": "上線後用 BEP20 充值 USDT，手續費最低；小額不要用 TRC20，手續費可能吃掉將近一成。",
+      "promise": "確認以後，我們只會在正式上線時寄一封通知給你，不寄其他郵件。",
+      "unsubscribe": "不想再收到：打開上面的專屬頁面，在頁面最下面按「取消訂閱」。",
+      "ignore": "如果不是你本人留的信箱，忽略這封郵件即可，不會訂閱。"
+    },
+    "zh-CN": {
+      "subject": "请确认订阅 Quick Come 上线通知",
+      "heading": "还差一步：确认订阅",
+      "intro": "你在 Quick Come 留下了这个邮箱。点下面的按钮，打开页面就完成订阅（7 天内有效）。",
+      "button": "确认订阅",
+      "fallback": "按钮打不开的话，把这个链接复制到浏览器打开：",
+      "page": "这个链接也是你的专属页面：之后再打开，就能拿邀请链接、看你邀请了几个人。请不要转给别人。",
+      "depositTitle": "充值小提醒",
+      "deposit": "上线后用 BEP20 充值 USDT，手续费最低；小额不要用 TRC20，手续费可能吃掉将近一成。",
+      "promise": "确认以后，我们只会在正式上线时给你发一封通知，不发其他邮件。",
+      "unsubscribe": "不想再收到：打开上面的专属页面，在页面最下面点\"取消订阅\"。",
+      "ignore": "如果不是你本人留的邮箱，忽略这封邮件即可，不会订阅。"
+    },
+    "en": {
+      "subject": "Confirm your Quick Come launch notice",
+      "heading": "One more step: confirm",
+      "intro": "This email address was left on Quick Come. Click the button below; opening the page completes your subscription (valid for 7 days).",
+      "button": "Confirm subscription",
+      "fallback": "If the button does not work, copy this link into your browser:",
+      "page": "This link is also your private page: open it again any time to get your invite link and see how many people you have invited. Please do not share it.",
+      "depositTitle": "Deposit tip",
+      "deposit": "After launch, deposit USDT over BEP20 for the lowest fee; avoid TRC20 for small amounts, where the fee can eat up nearly 10%.",
+      "promise": "Once confirmed, we will send you a single email when we launch, and nothing else.",
+      "unsubscribe": "To stop receiving emails: open your private page above and click \"Unsubscribe\" at the bottom.",
+      "ignore": "If this was not you, just ignore this email and you will not be subscribed."
+    }
+  }
+}

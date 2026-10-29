@@ -1,0 +1,7 @@
+# 密钥扫描（CI basic job 的 gitleaks）：沿用默认规则；测试里的假值（ci_only_ 开头、e2e 用的假 key）不算密钥。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "测试用的假值"
+regexes = ['''ci_only_[a-z_0-9]+''', '''e2e_dummy_key''']
