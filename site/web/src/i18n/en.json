@@ -47,7 +47,7 @@
     "again": "Use a different email",
     "errRequired": "Please enter your email.",
     "errEmail": "That email doesn't look right. Write it like you@example.com.",
-    "doneHint": "Nothing arrived? Check your spam folder. You can submit again after 10 minutes."
+    "doneHint": "Nothing arrived? Check your spam folder. You can submit again after 10 minutes. If this email is already subscribed, no new confirmation email is sent."
   },
   "matches": {
     "title": "This week's big games",
