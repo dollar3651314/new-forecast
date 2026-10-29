@@ -101,7 +101,7 @@ const TEMPLATE_HELP = [
   ['3. 主隊、客隊：各最多 20 個字，首頁顯示成「主隊 vs 客隊」。'],
   ['4. 開賽時間（台灣）：寫台灣時間，例如 2026-11-02 10:30；寫成 2026/11/2 9:30 也可以。'],
   ['5. 備註：選填，只在名單頁顯示，首頁不顯示。'],
-  ['6. 首頁最多顯示 5 場：超過時只保留開賽時間最近的 5 場。'],
+  ['6. 最多 10 場：超過時只保留開賽時間最近的 10 場；首頁顯示其中最近的 6 場。'],
   ['例子：NBA ｜ 湖人 ｜ 勇士 ｜ 2026-11-02 10:30 ｜ （空白）'],
 ];
 
@@ -192,7 +192,7 @@ export async function readTable(file: File): Promise<unknown[][]> {
   return X.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: '' });
 }
 
-/** 导入预览：哪些行导入后会显示、哪些因为超过 5 场不导入、现有的哪些会被替换掉（和后端同一个 pickMatches） */
+/** 导入预览：哪些行导入后会显示、哪些因为超过上限不导入、现有的哪些会被替换掉（和后端同一个 pickMatches） */
 export function previewImport<E extends { id: number; startsAt: string; title: string }>(rows: ParsedRow[], existing: E[], replace: boolean, now: number) {
   const ok = rows.filter((r) => r.value).map((r) => ({ ...r, startsAt: r.value!.startsAt }));
   const { keep, drop } = pickMatches(replace ? [] : existing, ok, now);

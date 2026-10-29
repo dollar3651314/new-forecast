@@ -10,6 +10,7 @@ import {
   matchVisible,
   normLang,
   parseTaiwanTime,
+  MATCH_LIMITS,
   pickMatches,
   poolExample,
   taiwanPickerValue,
@@ -123,11 +124,12 @@ describe('焦点战的时间（台湾时间，写法宽松，C108）', () => {
     expect(matchTitle({ home: '', away: '', title: '湖人 vs 勇士' })).toBe('湖人 vs 勇士');
   });
 
-  it('导入挑场次：先去掉已开赛超过 3 小时的，再按开赛时间留最近的 5 场', () => {
+  it('导入挑场次：先去掉已开赛超过 3 小时的，再按开赛时间留最近的 max 场（上限 10 场、首页显示 6 场）', () => {
+    expect(MATCH_LIMITS).toMatchObject({ max: 10, shown: 6 });
     const at = (h: number) => new Date(NOW + h * 3600_000).toISOString();
     const existing = [{ id: 1, startsAt: at(-4) }, { id: 2, startsAt: at(50) }];
     const incoming = [10, 20, 30, 40, 60].map((h) => ({ line: h, startsAt: at(h) }));
-    const { keep, drop } = pickMatches(existing, incoming, NOW);
+    const { keep, drop } = pickMatches(existing, incoming, NOW, 5);
     expect(keep.map((x) => ('id' in x ? `e${x.id}` : `n${x.line}`))).toEqual(['n10', 'n20', 'n30', 'n40', 'e2']);
     expect(drop.map((x) => ('id' in x ? `e${x.id}` : `n${x.line}`)).sort()).toEqual(['e1', 'n60']);
   });

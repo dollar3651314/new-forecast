@@ -1,6 +1,7 @@
 /** 名单页：一个密码登录、锁定（对外一律同一个通用回答）、Cookie、默认关着（404）、指标、邀请排行、名单（邀请人）、焦点战（含批量导入）、导出再验证。时间固定（C106）。 */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { LOCK, SESSION_MS } from '../../worker/src/auth';
+import { MATCH_LIMITS } from '../../shared/rules';
 import { AP, call, cookieFrom, freshIp, newDb, PW, req, stubFetch, subscribeAndConfirm, T0, testEnv } from './helpers';
 
 let db: D1Database;
@@ -306,7 +307,7 @@ describe('名单页内容', () => {
 });
 
 describe('焦点战', () => {
-  it('增删改：主队、客队分开填，时间写法宽松（含日期时间选择器的写法）、自动整理成台湾时间；一次返回全部字段错误；最多 5 场；首页只显示开赛不到 3 小时的，不返回备注', async () => {
+  it('增删改：主队、客队分开填，时间写法宽松（含日期时间选择器的写法）、自动整理成台湾时间；一次返回全部字段错误；最多 10 场；首页只显示开赛不到 3 小时的，不返回备注', async () => {
     await resetAuth();
     await db.prepare('DELETE FROM featured_matches').run();
     const env = testEnv(db);
@@ -335,7 +336,8 @@ describe('焦点战', () => {
     ]);
     const put = await call(env, req('PUT', `${AP}/api/matches/${m1.id}`, { cookie: ck, body: { league: 'NBA', home: '湖人', away: '塞爾提克', startsAt: '2026/11/02 10:30', note: '例行賽' } }));
     expect(await put.json()).toMatchObject({ title: '湖人 vs 塞爾提克', startsAtTw: '2026-11-02 10:30', note: '例行賽' });
-    for (let i = 0; i < 3; i++) expect((await post({ league: '英超', home: `主${i}`, away: `客${i}`, startsAt: '2026-11-03 00:30' })).status).toBe(201);
+    // 已有 2 场，补到上限
+    for (let i = 0; i < MATCH_LIMITS.max - 2; i++) expect((await post({ league: '英超', home: `主${i}`, away: `客${i}`, startsAt: '2026-11-03 00:30' })).status).toBe(201);
     const full = await post({ league: '英超', home: '主', away: '客', startsAt: '2026-11-03 00:30' });
     expect(full.status).toBe(409);
     expect((await call(env, req('DELETE', `${AP}/api/matches/${m1.id}`, { cookie: ck }))).status).toBe(204);
@@ -354,7 +356,7 @@ describe('焦点战', () => {
     expect(pub.items.map((x) => x.title)).toEqual(['湖人 vs 勇士']);
   });
 
-  it('批量导入：逐行检查（行号.字段），有错一行都不写；超过 5 场只留开赛时间最近的 5 场，已开赛超过 3 小时的先去掉；可以先清空', async () => {
+  it('批量导入：逐行检查（行号.字段），有错一行都不写；超过 10 场只留开赛时间最近的 10 场，已开赛超过 3 小时的先去掉；可以先清空', async () => {
     await resetAuth();
     await db.prepare('DELETE FROM featured_matches').run();
     const env = testEnv(db);
@@ -371,13 +373,23 @@ describe('焦点战', () => {
       { field: '1.startsAt', code: 'TIME_INVALID' },
     ]);
     expect((await db.prepare('SELECT COUNT(*) AS n FROM featured_matches').first<{ n: number }>())!.n).toBe(2);
-    // 导入 5 场：加上现有 1 场共 6 场 → 留最近的 5 场（最晚的 11/09 不导入），已开赛的旧场次去掉
-    const rows = ['2026-11-01 08:00', '2026-11-02 08:00', '2026-11-03 08:00', '2026-11-04 08:00', '2026-11-09 08:00'].map((t, i) => ({ league: '英超', home: `主${i}`, away: `客${i}`, startsAt: t }));
+    // 导入 n 场（n = 上限 10）：加上现有 1 场共 n+1 场 → 留最近的 n 场（最晚的 11/29 不导入），已开赛的旧场次去掉
+    const n = MATCH_LIMITS.max;
+    const times = [...Array.from({ length: n - 1 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')} 08:00`), '2026-11-29 08:00'];
+    const rows = times.map((t, i) => ({ league: '英超', home: `主${i}`, away: `客${i}`, startsAt: t }));
     const r = await imp({ items: rows });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ imported: 4, skipped: 1, removed: 1, total: 5, max: 5 });
+    expect(await r.json()).toEqual({ imported: n - 1, skipped: 1, removed: 1, total: n, max: n });
     const list = (await (await call(env, req('GET', `${AP}/api/matches`, { cookie: ck }))).json()) as { items: { title: string }[] };
-    expect(list.items.map((x) => x.title)).toEqual(['主0 vs 客0', '主1 vs 客1', '主2 vs 客2', '主3 vs 客3', '現有 vs 一場']);
+    // 11/05 10:00 的现有场次排在 11/05 08:00（主4）之后
+    expect(list.items.map((x) => x.title)).toEqual([
+      ...Array.from({ length: 5 }, (_, i) => `主${i} vs 客${i}`),
+      '現有 vs 一場',
+      ...Array.from({ length: n - 6 }, (_, i) => `主${i + 5} vs 客${i + 5}`),
+    ]);
+    // 首页只显示开赛时间最近的 6 场
+    const pub = (await (await call(env, req('GET', '/api/public/matches'))).json()) as { items: { title: string }[] };
+    expect(pub.items.map((x) => x.title)).toEqual(list.items.slice(0, MATCH_LIMITS.shown).map((x) => x.title));
     // 先清空再导入
     const r2 = await imp({ items: rows.slice(0, 2), replace: true });
     expect(await r2.json()).toMatchObject({ imported: 2, total: 2 });

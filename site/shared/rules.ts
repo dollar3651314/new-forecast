@@ -65,7 +65,8 @@ export function inviteCodeOf(ref: unknown): string | null {
 }
 
 // ---------- 焦点战（M-2，名单页填写或批量导入） ----------
-export const MATCH_LIMITS = { league: 20, home: 20, away: 20, note: 60, max: 5 };
+/** max：名单页最多存几场；shown：首页最多显示几场（按开赛时间最近的）。2026-10-29 Amos 按市场经理建议从 5 场改为 10 / 6（F-1） */
+export const MATCH_LIMITS = { league: 20, home: 20, away: 20, note: 60, max: 10, shown: 6 };
 /** 联赛下拉的选项（名单页）；选"其他"时另填联赛名 */
 export const MATCH_LEAGUES = ['NBA', 'MLB', '英超', '西甲', '歐冠', '中職'] as const;
 export const OTHER_LEAGUE = '其他';
