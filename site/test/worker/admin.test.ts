@@ -36,7 +36,7 @@ describe('默认关着：ADMIN_PATH、ADMIN_PASSWORD 任一没配好', () => {
     ['密码没填', { ADMIN_PASSWORD: undefined }],
     ['密码 15 个字符', { ADMIN_PASSWORD: 'x'.repeat(15) }],
     ['地址没填', { ADMIN_PATH: undefined }],
-    ['地址太短', { ADMIN_PATH: '/qc-ops-1' }],
+    ['地址太短（/ 后面少于 6 个字符）', { ADMIN_PATH: '/qc-op' }],
     ['地址有别的字符', { ADMIN_PATH: '/qc_ops/test-0001' }],
   ] as const) {
     it(`${name}：名单页地址下的页面和接口都和不存在的地址一样，健康检查 admin = not_configured`, async () => {
@@ -58,6 +58,15 @@ describe('默认关着：ADMIN_PATH、ADMIN_PASSWORD 任一没配好', () => {
       expect(JSON.stringify(h)).not.toContain('x'.repeat(15));
     });
   }
+
+  it('地址 / 后面正好 6 个字符就能用（Amos 2026-10-29：大于等于 6 个字符）', async () => {
+    const env = testEnv(db, { ADMIN_PATH: '/qc-ops' });
+    const h = await (await call(env, req('GET', '/api/health'))).json();
+    expect(h).toMatchObject({ checks: { admin: 'ok' } });
+    expect(JSON.stringify(h)).not.toContain('/qc-ops');
+    const r = await call(env, req('GET', '/qc-ops/api/session'));
+    expect(await r.text()).not.toBe('asset:/qc-ops/api/session');
+  });
 
   it('开通后：名单页在 ADMIN_PATH 下（noindex、不缓存）；/admin、/admin.html、/api/admin/*、名单页的 HTML 文件 /console.html 都和不存在的地址一模一样', async () => {
     const env = testEnv(db, { ADMIN_PASSWORD: '中'.repeat(16) });
