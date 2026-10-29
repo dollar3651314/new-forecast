@@ -64,8 +64,8 @@ enabled = true
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
-# 测试版用请求自己的地址（workers.dev）拼邮件里的链接
-PUBLIC_BASE_URL = ""
+# 测试版的网址：Amos 2026-10-29 要求用 fc-test-www.quickcome.online（在 Cloudflare 控制台把这个自定义域名绑到测试版 Worker）；邮件里的链接按它拼
+PUBLIC_BASE_URL = "https://fc-test-www.quickcome.online"
 MAIL_FROM = "Quick Come <noreply@fc-email.quickcome.online>"
 # 整站密码门：写在这里，控制台改不掉（keep_vars 只保留控制台里有、这里没有的变量）
 SITE_GATE = "on"
