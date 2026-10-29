@@ -36,7 +36,7 @@ enabled = true
 [vars]
 ENVIRONMENT = "production"
 PUBLIC_BASE_URL = "https://www.quickcome.online"
-MAIL_FROM = "Quick Come <noreply@fc-email.quickcome.online>"
+MAIL_FROM = "Quick Come <noreply@email.quickcome.online>"
 
 [env.staging]
 name = "new-forecast-site-staging"
@@ -68,4 +68,4 @@ enabled = true
 ENVIRONMENT = "staging"
 # 测试版的网址：Amos 2026-10-29 要求用 fc-test-www.quickcome.online（在 Cloudflare 控制台把这个自定义域名绑到测试版 Worker）；邮件里的链接按它拼
 PUBLIC_BASE_URL = "https://fc-test-www.quickcome.online"
-MAIL_FROM = "Quick Come <noreply@fc-email.quickcome.online>"
+MAIL_FROM = "Quick Come <noreply@email.quickcome.online>"
