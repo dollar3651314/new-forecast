@@ -13,10 +13,10 @@ function fakeDist(files: Record<string, string>): string {
   const base: Record<string, string> = {
     'index.html':
       '<meta name="qc-site" content="prelaunch"><meta property="og:image" content="https://www.quickcome.online/og-return-rate.png"><script type="module" src="/assets/index-a.js"></script>',
-    'admin.html': '<script type="module" src="/assets/admin-a.js"></script>',
-    'assets/index-a.js': 'import{x}from"./Chrome-a.js";fetch("/api/public/subscribe");"/api/public/confirm";"/api/public/unsubscribe";"/api/public/invite";"/api/public/board";"/api/public/matches"',
+    'console.html': '<script type="module" src="/assets/console-a.js"></script>',
+    'assets/index-a.js': 'import{x}from"./Chrome-a.js";fetch("/api/public/subscribe");"/api/public/confirm";"/api/public/unsubscribe";"/api/public/subscription";"/api/public/board";"/api/public/matches"',
     'assets/Chrome-a.js': 'export const x=1;"/api/public/site"',
-    'assets/admin-a.js': 'fetch("/api/admin/login")',
+    'assets/console-a.js': 'fetch(base+"/api/login")',
     'og-return-rate.png': 'png',
     'robots.txt': '',
     'sitemap.xml': '',
@@ -32,7 +32,7 @@ function fakeDist(files: Record<string, string>): string {
 }
 
 describe('check-dist', () => {
-  it('正常的产物通过（名单页接口只在 admin 的 JS 里）', () => {
+  it('正常的产物通过（名单页接口只在名单页的 JS 里）', () => {
     expect(check(fakeDist({}))).toEqual([]);
   });
   it.each([
@@ -49,8 +49,14 @@ describe('check-dist', () => {
   it('公开页面引用到的 JS 里有 /api/admin：失败', () => {
     expect(check(fakeDist({ 'assets/Chrome-a.js': 'export const x="/api/admin/metrics"' })).join('\n')).toContain('公开页面的 JS 里有名单页接口');
   });
+  it('名单页能被猜到：有名字带 admin 的文件、html 里有 admin、公开页面引用了名单页：失败', () => {
+    expect(check(fakeDist({ 'admin.html': '<p>x</p>' })).join('\n')).toContain('有名字带 admin 的文件');
+    expect(check(fakeDist({ 'console.html': '<a href="/admin">x</a>' })).join('\n')).toContain('"admin" 字样');
+    expect(check(fakeDist({ 'assets/Chrome-a.js': 'import("./console-a.js")' })).join('\n')).toContain('引用了名单页');
+    expect(check(fakeDist({ 'assets/Chrome-a.js': 'fetch("/api/login")' })).join('\n')).toContain('名单页的接口');
+  });
   it('缺分享卡片、缺接口：失败', () => {
-    const p = check(fakeDist({ 'index.html': '<meta name="qc-site" content="prelaunch"><script type="module" src="/assets/admin-a.js"></script>' })).join('\n');
+    const p = check(fakeDist({ 'index.html': '<meta name="qc-site" content="prelaunch"><script type="module" src="/assets/console-a.js"></script>' })).join('\n');
     expect(p).toContain('og:image');
     expect(p).toContain('/api/public/subscribe');
   });

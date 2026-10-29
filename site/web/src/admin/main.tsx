@@ -1,4 +1,4 @@
-/** 名单页入口（admin.html，地址 /admin）。只有 ADMIN_PASSWORD 开通时 Worker 才给这一页（没开通 404）。 */
+/** 名单页入口（console.html）。只由 Worker 在密钥 ADMIN_PATH 的地址下提供（ADMIN_PATH、ADMIN_PASSWORD 任一没配好时整体 404）。 */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles.css';

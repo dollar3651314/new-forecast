@@ -51,6 +51,6 @@ if [ -n "$URL" ]; then
     echo "$body" | grep -q "\"version\":\"$SHA\"" && break
     sleep 5
   done
-  echo "· 健康检查（$URL/api/health，不含密钥）：$(echo "$body" | grep -oE '"(status|environment|version|mail|admin|gate)":"[^"]*"' | tr '\n' ' ')"
+  echo "· 健康检查（$URL/api/health，不含密钥）：$(echo "$body" | grep -oE '"(status|environment|version|mail|admin)":"[^"]*"' | tr '\n' ' ')"
   echo "  默认关着的功能（C102）：mail = not_configured 表示还没填 RESEND_API_KEY（不发确认信）；admin = not_configured 表示还没填 ADMIN_PASSWORD（名单页 404$( [ "$TARGET" = staging ] && echo '，测试版整站 503' )）"
 fi

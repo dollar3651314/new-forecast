@@ -64,33 +64,44 @@ export function inviteCodeOf(ref: unknown): string | null {
   return INVITE_CODE_RE.test(up) ? up : null;
 }
 
-// ---------- 焦点战（M-2，名单页填写） ----------
-export const MATCH_LIMITS = { league: 20, title: 40, note: 60, max: 5 };
+// ---------- 焦点战（M-2，名单页填写或批量导入） ----------
+export const MATCH_LIMITS = { league: 20, home: 20, away: 20, note: 60, max: 5 };
+/** 联赛下拉的选项（名单页）；选"其他"时另填联赛名 */
+export const MATCH_LEAGUES = ['NBA', 'MLB', '英超', '西甲', '歐冠', '中職'] as const;
+export const OTHER_LEAGUE = '其他';
 /** 台湾时间 = UTC+8，没有夏令时 */
 export const TW_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 export type MatchFieldError = 'REQUIRED' | 'TOO_LONG' | 'TIME_FORMAT' | 'TIME_INVALID';
+export type MatchField = 'league' | 'home' | 'away' | 'startsAt' | 'note';
 
 export interface MatchInput {
   league: string;
-  title: string;
-  /** 台湾时间，写法宽松：2026-11-02 10:30、2026/11/2 9:30、11/02 10:30（省略年份）、2026-11-02 9（整点） */
+  /** 主队 */
+  home: string;
+  /** 客队 */
+  away: string;
+  /** 台湾时间，写法宽松：2026-11-02 10:30、2026-11-02T10:30（日期时间选择器）、2026/11/2 9:30、11/02 10:30（省略年份）、2026-11-02 9（整点） */
   startsAt: string;
   note?: string;
 }
 
 export interface MatchClean {
   league: string;
+  home: string;
+  away: string;
+  /** 首页显示的对战：主队 vs 客队 */
   title: string;
   /** UTC 的 ISO 字符串（毫秒，结尾 Z） */
   startsAt: string;
   note: string;
 }
 
-const TIME_RE = /^(?:(\d{4})[-/.])?(\d{1,2})[-/.](\d{1,2})(?:\s+|T)(\d{1,2})(?::(\d{2}))?$/;
+const TIME_RE = /^(?:(\d{4})[-/.])?(\d{1,2})[-/.](\d{1,2})(?:\s+|T)(\d{1,2})(?::(\d{2}))?(?::\d{2}(?:\.\d+)?)?$/;
 
 /**
  * 台湾时间的写法 → UTC ISO。省略年份时取"台湾今天所在的年份"，如果这样算出来的时间比现在早 60 天以上，算明年（跨年时 12 月填 1 月的比赛）。
+ * 秒可以有（Excel 里的"2026/11/2 10:30:00"），但不计。
  * 返回错误码：TIME_FORMAT（写法认不出）、TIME_INVALID（日期不存在，例如 2 月 30 日、25:00）。
  */
 export function parseTaiwanTime(raw: string, now: number): { ok: true; iso: string } | { ok: false; code: 'REQUIRED' | 'TIME_FORMAT' | 'TIME_INVALID' } {
@@ -118,34 +129,112 @@ export function parseTaiwanTime(raw: string, now: number): { ok: true; iso: stri
   return { ok: true, iso: new Date(make(year)).toISOString() };
 }
 
-/** UTC ISO → 台湾时间的标准写法 2026-11-02 10:30（名单页表格、编辑框用） */
+/** UTC ISO → 台湾时间的标准写法 2026-11-02 10:30（名单页表格、导出用） */
 export function formatTaiwanTime(iso: string): string {
   const d = new Date(Date.parse(iso) + TW_OFFSET_MS);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
+/** UTC ISO → 日期时间选择器（input type=datetime-local）的值 2026-11-02T10:30（按台湾时间） */
+export function taiwanPickerValue(iso: string): string {
+  return formatTaiwanTime(iso).replace(' ', 'T');
+}
+
+/**
+ * Excel 的日期数字（1900 日期系统：1 = 1900-01-01，小数是一天里的时间）→ 台湾时间的写法 2026-11-02 10:30。
+ * Excel 里的日期没有时区，按"填的就是台湾时间"处理。认不出返回 null。
+ */
+export function excelSerialToTaiwanText(serial: number): string | null {
+  if (!Number.isFinite(serial) || serial < 1 || serial > 2958465) return null;
+  // 1899-12-30 是 0（Excel 把 1900 年当成闰年，所以从 12-30 起算对 1900-03-01 以后的日期都对）
+  const ms = Math.round((serial * 86400_000) / 60_000) * 60_000 + Date.UTC(1899, 11, 30);
+  return formatTaiwanTime(new Date(ms - TW_OFFSET_MS).toISOString());
+}
+
+/** 一场焦点战首页显示的对战名：有主客队用"主队 vs 客队"，旧数据只有 title 时用 title */
+export function matchTitle(m: { home?: string | null; away?: string | null; title?: string | null }): string {
+  return m.home && m.away ? `${m.home} vs ${m.away}` : (m.title ?? '');
+}
+
 /**
  * 检查并规范一场焦点战：**每个字段都检查完**再返回（一次提示全部错误，C56），错误按字段给出。
  * 文字字段去掉前后空白；长度按字符数（中文一个字算 1）。
  */
-export function validateMatch(input: Partial<Record<keyof MatchInput, unknown>>, now: number): { ok: true; value: MatchClean } | { ok: false; errors: Partial<Record<keyof MatchInput, MatchFieldError>> } {
-  const errors: Partial<Record<keyof MatchInput, MatchFieldError>> = {};
-  const text = (k: 'league' | 'title' | 'note', required: boolean): string => {
-    const v = typeof input[k] === 'string' ? (input[k] as string).trim() : '';
+export function validateMatch(input: Partial<Record<MatchField, unknown>>, now: number): { ok: true; value: MatchClean } | { ok: false; errors: Partial<Record<MatchField, MatchFieldError>> } {
+  const errors: Partial<Record<MatchField, MatchFieldError>> = {};
+  const text = (k: 'league' | 'home' | 'away' | 'note', required: boolean): string => {
+    const raw = input[k];
+    const v = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
     if (!v && required) errors[k] = 'REQUIRED';
     else if ([...v].length > MATCH_LIMITS[k]) errors[k] = 'TOO_LONG';
     return v;
   };
   const league = text('league', true);
-  const title = text('title', true);
+  const home = text('home', true);
+  const away = text('away', true);
   const note = text('note', false);
   let startsAt = '';
   const t = parseTaiwanTime(typeof input.startsAt === 'string' ? input.startsAt : '', now);
   if (t.ok) startsAt = t.iso;
   else errors.startsAt = t.code;
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, value: { league, title, startsAt, note } };
+  return { ok: true, value: { league, home, away, title: `${home} vs ${away}`, startsAt, note } };
+}
+
+/**
+ * 批量导入时挑出最后保留的场次（最多 max 场）：先去掉首页已经不显示的（开赛超过 3 小时），再按开赛时间从早到晚留最近的 max 场。
+ * existing 是现有的场次（replace = true 时不算）；返回保留和放弃的，各自保持原来的对象。前后端都用这一个函数，预览和实际导入结果一样。
+ */
+export function pickMatches<E extends { startsAt: string }, N extends { startsAt: string }>(
+  existing: E[],
+  incoming: N[],
+  now: number,
+  max = MATCH_LIMITS.max,
+): { keep: (E | N)[]; drop: (E | N)[] } {
+  const all: (E | N)[] = [...existing, ...incoming];
+  const live = all.filter((x) => matchVisible(x.startsAt, now)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const keep = live.slice(0, max);
+  return { keep, drop: all.filter((x) => !keep.includes(x)) };
+}
+
+/** 导入文件的表头（第一行）：每一列认几种写法，繁简都行 */
+export const IMPORT_HEADERS: Record<MatchField, string[]> = {
+  league: ['聯賽', '联赛'],
+  home: ['主隊', '主队'],
+  away: ['客隊', '客队'],
+  startsAt: ['開賽時間（台灣）', '开赛时间（台湾）', '開賽時間', '开赛时间', '開賽時間(台灣)', '开赛时间(台湾)'],
+  note: ['備註', '备注'],
+};
+/** 下载的模板用的表头（第一项） */
+export const TEMPLATE_HEADERS = (['league', 'home', 'away', 'startsAt', 'note'] as MatchField[]).map((k) => IMPORT_HEADERS[k][0]);
+
+// ---------- 来源（名单页、导出显示用） ----------
+/** 常见的 ?src= 值 → 人看得懂的名字；其他的显示"其他：原文" */
+const SOURCE_NAMES: Record<string, string> = {
+  x: 'X',
+  twitter: 'X',
+  threads: 'Threads',
+  ig: 'Instagram',
+  instagram: 'Instagram',
+  fb: 'Facebook',
+  facebook: 'Facebook',
+  line: 'LINE',
+  tg: 'Telegram',
+  telegram: 'Telegram',
+  yt: 'YouTube',
+  youtube: 'YouTube',
+  ptt: 'PTT',
+  dcard: 'Dcard',
+  google: 'Google',
+};
+
+/** channel（订阅时的来源归类：invite / src 原文 / 空串）→ 显示的名字。zh 决定"订阅者邀请""直接打开"用繁体还是简体 */
+export function channelLabel(channel: string | null | undefined, zh: 'zh-TW' | 'zh-CN' = 'zh-TW'): string {
+  const c = (channel ?? '').trim();
+  if (c === 'invite') return zh === 'zh-TW' ? '訂閱者邀請' : '订阅者邀请';
+  if (!c) return zh === 'zh-TW' ? '直接打開' : '直接打开';
+  return SOURCE_NAMES[c.toLowerCase()] ?? `其他：${c}`;
 }
 
 /** 首页只显示还没开赛、或开赛不到 3 小时的焦点战（比赛打完自然下架；名单页会写明哪些已经不显示，C49） */

@@ -14,3 +14,6 @@
 /invite
   X-Robots-Tag: noindex
   Referrer-Policy: no-referrer
+/subscription
+  X-Robots-Tag: noindex
+  Referrer-Policy: no-referrer

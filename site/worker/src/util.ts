@@ -1,4 +1,4 @@
-/** 小工具：时间、随机串、哈希、打码、开关。参照 forecast main 0caa740 cf/src/util.ts。 */
+/** 小工具：时间、随机串、哈希、打码、日志。参照 forecast main 0caa740 cf/src/util.ts。 */
 import { INVITE_ALPHABET } from '../../shared/rules';
 
 /** 时间一律存 UTC 的 ISO 字符串（毫秒，结尾 Z），按字符串比较就是按时间比较 */
@@ -10,7 +10,7 @@ function hex(b: Uint8Array): string {
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
-/** 16 字节随机数的十六进制（32 个字符）：确认、退订链接和邀请查看页的私密密钥 */
+/** 16 字节随机数的十六进制（32 个字符）：确认、退订链接和专属页面的私密密钥 */
 export function token(): string {
   const b = new Uint8Array(16);
   crypto.getRandomValues(b);
@@ -41,12 +41,6 @@ export function mask(email: string | null | undefined): string {
   const at = email ? email.indexOf('@') : -1;
   if (!email || at <= 0) return '***';
   return `${email[0]}***${email.slice(at)}`;
-}
-
-/** 变量是不是"打开"（true / 1 / yes / on，大小写不论）；没填用默认值 */
-export function flag(v: string | undefined, dflt: boolean): boolean {
-  if (v === undefined || v.trim() === '') return dflt;
-  return ['true', '1', 'yes', 'on'].includes(v.trim().toLowerCase());
 }
 
 export function log(event: string, fields: Record<string, unknown> = {}): void {

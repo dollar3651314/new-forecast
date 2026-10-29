@@ -5,9 +5,11 @@
  *   - 交易、账户类接口：/api/auth、/api/me、/api/bet(s)、/api/wallet、/api/account、/api/markets、/api/order(s)、/api/deposit、/api/withdraw、/api/kyc、/api/trade、/api/register、/api/signup
  *   - 交易、账户类页面路径："/login"、"/register"、"/signup"、"/markets"、"/wallet"、"/deposit"、"/withdraw"、"/bet(s)"、"/trade"、"/account"、"/me"（以及它们下面的子路径）
  *   - 测试环境的地址（workers.dev）不能写死进页面
- * 二、公开页面（index.html 和它引用的 JS）里不能有名单页接口 /api/admin（名单页是单独的入口 admin.html）。
- * 三、必须有的：index.html（meta qc-site = prelaunch、分享卡片 og:image）、admin.html、og-return-rate.png、robots.txt、sitemap.xml、_headers、favicon.svg；
- *   公开页面里有留邮箱、确认、退订、邀请、看板、焦点战的接口。
+ * 二、名单页不能被猜到（v1.1：名单页的地址是密钥 ADMIN_PATH，只由 Worker 提供 console.html）：
+ *   - 产物里没有名字带 "admin" 的文件，任何 .html 里没有 "admin" 字样；
+ *   - 公开页面（index.html 和它引用的 JS）里没有名单页接口（/api/admin、/api/login 这类）和名单页的 HTML（console.html）。
+ * 三、必须有的：index.html（meta qc-site = prelaunch、分享卡片 og:image）、console.html（名单页）、og-return-rate.png、robots.txt、sitemap.xml、_headers、favicon.svg；
+ *   公开页面里有留邮箱、专属页面（确认、邀请）、退订、看板、焦点战的接口。
  * 用法：node scripts/check-dist.mjs [目录，默认 site/dist]
  * 参照：forecast main 0caa740 cf/scripts/check-dist.mjs。
  */
@@ -23,7 +25,7 @@ export const FORBIDDEN = [
   [/[a-z0-9-]+\.workers\.dev/, '写死的 workers.dev 地址（备用网址由 /api/public/site 给）'],
 ];
 
-export const PUBLIC_APIS = ['/api/public/subscribe', '/api/public/confirm', '/api/public/unsubscribe', '/api/public/invite', '/api/public/board', '/api/public/matches'];
+export const PUBLIC_APIS = ['/api/public/subscribe', '/api/public/confirm', '/api/public/unsubscribe', '/api/public/subscription', '/api/public/board', '/api/public/matches'];
 
 function walk(d, out = []) {
   for (const f of readdirSync(d)) {
@@ -62,7 +64,12 @@ export function check(root) {
       if (m) problems.push(`${path.relative(root, f)}：有${what}「${m[0]}」`);
     }
   }
-  for (const rel of ['index.html', 'admin.html', 'og-return-rate.png', 'robots.txt', 'sitemap.xml', '_headers', 'favicon.svg']) {
+  for (const f of files) {
+    const rel = path.relative(root, f);
+    if (/admin/i.test(rel)) problems.push(`有名字带 admin 的文件：${rel}（名单页的地址不能被猜到）`);
+    if (/\.html$/.test(f) && /admin/i.test(readFileSync(f, 'utf8'))) problems.push(`${rel} 里有 "admin" 字样（名单页的地址不能被猜到）`);
+  }
+  for (const rel of ['index.html', 'console.html', 'og-return-rate.png', 'robots.txt', 'sitemap.xml', '_headers', 'favicon.svg']) {
     if (!existsSync(path.join(root, rel))) problems.push(`缺少 ${rel}`);
   }
   if (existsSync(path.join(root, 'index.html'))) {
@@ -73,6 +80,8 @@ export function check(root) {
     if (pub.length === 0) problems.push('index.html 没有引用任何 JS');
     const text = pub.map((r) => readFileSync(path.join(root, r), 'utf8')).join('\n');
     if (text.includes('/api/admin')) problems.push(`公开页面的 JS 里有名单页接口 /api/admin（${pub.join('、')}）`);
+    if (/\/api\/(login|logout|session|metrics|subscribers|export)\b/.test(text)) problems.push(`公开页面的 JS 里有名单页的接口（${pub.join('、')}）`);
+    if (/console(\.html|-[A-Za-z0-9_-]+\.js)/.test(text)) problems.push(`公开页面的 JS 里引用了名单页（${pub.join('、')}）`);
     for (const a of PUBLIC_APIS) if (!text.includes(a)) problems.push(`公开页面里没有接口 ${a}`);
   }
   return problems;

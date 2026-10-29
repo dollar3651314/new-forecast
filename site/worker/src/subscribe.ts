@@ -1,13 +1,17 @@
 /**
- * 留邮箱、确认、退订、邀请（M-6、M-10；行为沿用 forecast S19 的等候页，参照 forecast main 0caa740 cf/src/waitlist.ts 改写）。
+ * 留邮箱、专属页面（确认、邀请、退订、重新订阅）、退订链接、访问计数（M-6、M-9、M-10；参照 forecast main 0caa740 cf/src/waitlist.ts 改写）。
  * - 留邮箱 POST /api/public/subscribe {email, lang, beta, src, cmp, ref, website}：
  *   双重确认（只发确认邮件）；回答永远是 {"status":"check_email"}，**不透露邮箱是否已在名单**；发信在回答之后（ctx.waitUntil）。
  *   防刷：陷阱字段 website 有值时照样回答、什么都不记；同一 IP 每小时 10 次（陷阱字段也算）；同一邮箱确认邮件至少隔 10 分钟、最多 5 封。
- * - 确认 POST /api/public/confirm {token}：**只有页面上点"确认订阅"才调用**（打开邮件里的链接不会自动确认，防止邮箱的链接扫描器替人确认）。
- *   随机串不对 404；超过 7 天 410 LINK_EXPIRED；重复确认没有效果。成功后返回邀请码和私密查看密钥。
- * - 退订 POST /api/public/unsubscribe {token}：不用登录，任何状态都能退订，重复也成功。
- * - 邀请 GET /api/public/invite?k=<私密密钥>：本人查看"你邀请了几个人"（不需要登录；密钥和邀请码不同，邀请码公开在 ?ref= 里也查不了别人的数字）。
- *   一次邀请 = 别人用 ?ref=<你的邀请码> 进来留邮箱并且确认了（之后退订也照样算，因为确认过）。
+ * - 确认邮件里只有一个入口：订阅者的**专属页面** /subscription?k=<私密密钥 invite_key>（v1.1，Amos 验收：打开链接就好，不要再按按钮）。
+ * - 专属页面 POST /api/public/subscription {key}：页面打开后**由页面脚本自动调用**，待确认的在这一步确认（7 天内有效，超过 410 LINK_EXPIRED），
+ *   然后返回状态、内测、邀请链接和人数。**确认只有 POST**：邮件安全扫描器预先打开链接（GET 页面）一般不执行脚本，不会替人确认。
+ *   刷新页面再调用一次没有副作用（已确认的不变）。密钥不对 404 LINK_INVALID。
+ * - POST /api/public/subscription/resend {key}：链接过期时重新寄一封（同一个专属页面地址，从现在起再算 7 天）。
+ * - POST /api/public/subscription/unsubscribe {key}、…/resubscribe {key}：在专属页面上退订、重新订阅（拿得到密钥 = 收得到这个邮箱的信）。
+ * - 退订 POST /api/public/unsubscribe {token}：邮件头 List-Unsubscribe 的退订页用，不用登录，任何状态都能退订，重复也成功。
+ * - 旧链接兼容：POST /api/public/confirm {token}（v1 的 /confirm?t=）确认后返回私密密钥，页面跳到专属页面。
+ * - 一次邀请 = 别人用 ?ref=<你的邀请码> 进来留邮箱并且确认了（之后退订也照样算，因为确认过）。
  * 状态都用带旧状态的条件更新，同时两次请求只有一个生效。
  */
 import { cleanAttr, inviteCodeOf, normEmail, normLang, validateEmail, type Lang } from '../../shared/rules';
@@ -38,6 +42,7 @@ export interface Row {
   unsub_token: string;
   invite_code: string;
   invite_key: string;
+  channel: string;
   confirmed_at: string | null;
 }
 
@@ -123,17 +128,21 @@ export async function subscribe(req: Request, env: Env, ctx: ExecutionContext, n
       // 已确认、没到 10 分钟、发够了：什么都不发，回答一样
     }
   }
-  if (send1) {
-    const site = siteBase(env, req);
-    const links = {
-      confirm: `${site}/confirm?t=${send1.confirm_token}`,
-      invite: `${site}/invite?k=${send1.invite_key}`,
-      unsubscribe: `${site}/unsubscribe?t=${send1.unsub_token}`,
-    };
-    const m = confirmMail(env, send1.lang, links);
-    ctx.waitUntil(send(env, { to: email, subject: m.subject, text: m.text, unsubscribeUrl: links.unsubscribe }));
-  }
+  if (send1) sendConfirmMail(env, ctx, req, send1);
   return done;
+}
+
+/** 专属页面的地址（邮件里唯一的链接）；带上订阅时的语言，页面用同一种语言显示 */
+export function subscriptionUrl(site: string, key: string, lang: Lang): string {
+  return `${site}/subscription?k=${key}&lang=${lang}`;
+}
+
+function sendConfirmMail(env: Env, ctx: ExecutionContext, req: Request, row: Row): void {
+  const site = siteBase(env, req);
+  const page = subscriptionUrl(site, row.invite_key, row.lang);
+  const unsubscribe = `${site}/unsubscribe?t=${row.unsub_token}`;
+  const m = confirmMail(env, row.lang, { page });
+  ctx.waitUntil(send(env, { to: row.email, subject: m.subject, text: m.text, html: m.html, unsubscribeUrl: unsubscribe }));
 }
 
 async function byColumn(env: Env, col: 'confirm_token' | 'unsub_token' | 'invite_key', raw: unknown): Promise<Row | null> {
@@ -152,26 +161,108 @@ async function invitedCount(db: D1Database, code: string): Promise<number> {
   return r?.n ?? 0;
 }
 
-function inviteInfo(row: Row, site: string, count: number) {
-  return { code: row.invite_code, key: row.invite_key, link: `${site}/?ref=${row.invite_code}`, count };
+/** 确认链接过期了吗：恰好满 7 天的那一毫秒还有效，之后才算过期（C106） */
+function expired(row: Row, now: number): boolean {
+  return now > Date.parse(row.confirm_sent_at) + RULES.confirmValidMs;
 }
 
+/** 待确认 → 已确认（条件更新，同时两次只有一个生效）；返回最新的一行 */
+async function confirmRow(env: Env, row: Row, now: number): Promise<Row> {
+  if (row.status === 'PENDING') {
+    await env.DB.prepare("UPDATE subscribers SET status = 'CONFIRMED', confirmed_at = ?1, updated_at = ?1 WHERE id = ?2 AND status = 'PENDING'")
+      .bind(iso(now), row.id)
+      .run();
+  }
+  return (await env.DB.prepare('SELECT * FROM subscribers WHERE id = ?1').bind(row.id).first<Row>())!;
+}
+
+/** 专属页面要显示的内容：状态、语言、内测；已确认的加邀请链接和人数 */
+async function pageState(env: Env, req: Request, row: Row): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = { status: row.status.toLowerCase(), lang: row.lang, beta: row.beta === 1 };
+  if (row.status === 'CONFIRMED') {
+    body.invite = { code: row.invite_code, link: `${siteBase(env, req)}/?ref=${row.invite_code}`, count: await invitedCount(env.DB, row.invite_code) };
+  }
+  return body;
+}
+
+/** POST /api/public/subscription {key}：专属页面打开时由页面脚本调用；待确认的在这里确认 */
+export async function subscription(req: Request, env: Env, now: number): Promise<Response> {
+  const r = await readJson(req);
+  if (!r.ok) return r.res;
+  const row = await byColumn(env, 'invite_key', r.body.key);
+  if (!row) return INVALID();
+  if (row.status === 'PENDING' && expired(row, now)) return error(410, 'LINK_EXPIRED', 'confirm link expired', [], { lang: row.lang });
+  const after = await confirmRow(env, row, now);
+  if (row.status === 'PENDING') log('subscribe.confirmed', { channel: after.channel || '-' });
+  return json(await pageState(env, req, after));
+}
+
+/** POST /api/public/subscription/resend {key}：过期了重新寄一封（从现在起再算 7 天；IP 限次和留邮箱共用） */
+export async function subscriptionResend(req: Request, env: Env, ctx: ExecutionContext, now: number): Promise<Response> {
+  const r = await readJson(req);
+  if (!r.ok) return r.res;
+  const lim = await hit(env.DB, 'subscribe', await sha256(clientIp(req)), RULES.ipPerHour, HOUR, now);
+  if (!lim.ok) return rateLimited(lim.retryAfter);
+  const row = await byColumn(env, 'invite_key', r.body.key);
+  if (!row) return INVALID();
+  if (row.status !== 'PENDING') return json({ ...(await pageState(env, req, row)), sent: false });
+  if (now < Date.parse(row.confirm_sent_at) + RULES.resendAfterMs) return rateLimited(Math.ceil((Date.parse(row.confirm_sent_at) + RULES.resendAfterMs - now) / 1000));
+  // 过期以后重寄：发送次数从 1 重新算（不然 5 封用完就永远确认不了）；没过期的仍按最多 5 封
+  const reset = expired(row, now);
+  if (!reset && row.confirm_sends >= RULES.maxConfirmSends) return rateLimited(Math.ceil(RULES.confirmValidMs / 1000));
+  const u = await env.DB.prepare(
+    "UPDATE subscribers SET confirm_sent_at = ?1, confirm_sends = CASE WHEN ?2 = 1 THEN 1 ELSE confirm_sends + 1 END, updated_at = ?1 WHERE id = ?3 AND status = 'PENDING' AND confirm_sends = ?4",
+  )
+    .bind(iso(now), reset ? 1 : 0, row.id, row.confirm_sends)
+    .run();
+  if (u.meta.changes === 1) sendConfirmMail(env, ctx, req, row);
+  return json({ status: 'pending', lang: row.lang, beta: row.beta === 1, sent: u.meta.changes === 1 });
+}
+
+/** POST /api/public/subscription/unsubscribe {key}：在专属页面上退订 */
+export async function subscriptionUnsubscribe(req: Request, env: Env, now: number): Promise<Response> {
+  const r = await readJson(req);
+  if (!r.ok) return r.res;
+  const row = await byColumn(env, 'invite_key', r.body.key);
+  if (!row) return INVALID();
+  await markUnsubscribed(env, row, now);
+  log('subscribe.unsubscribed', { via: 'page' });
+  return json(await pageState(env, req, (await env.DB.prepare('SELECT * FROM subscribers WHERE id = ?1').bind(row.id).first<Row>())!));
+}
+
+/** POST /api/public/subscription/resubscribe {key}：退订过的人在专属页面上重新订阅（直接恢复为已确认；确认时间记成现在） */
+export async function subscriptionResubscribe(req: Request, env: Env, now: number): Promise<Response> {
+  const r = await readJson(req);
+  if (!r.ok) return r.res;
+  const row = await byColumn(env, 'invite_key', r.body.key);
+  if (!row) return INVALID();
+  if (row.status === 'UNSUBSCRIBED') {
+    await env.DB.prepare("UPDATE subscribers SET status = 'CONFIRMED', confirmed_at = ?1, unsubscribed_at = NULL, updated_at = ?1 WHERE id = ?2 AND status = 'UNSUBSCRIBED'")
+      .bind(iso(now), row.id)
+      .run();
+    log('subscribe.resubscribed', {});
+  }
+  if (row.status === 'PENDING' && expired(row, now)) return error(410, 'LINK_EXPIRED', 'confirm link expired', [], { lang: row.lang });
+  return json(await pageState(env, req, await confirmRow(env, row, now)));
+}
+
+/** 旧链接兼容 POST /api/public/confirm {token}（v1 邮件里的 /confirm?t=）：确认后返回私密密钥，页面跳到专属页面；过期的也给密钥（专属页面上可以重寄） */
 export async function confirm(req: Request, env: Env, now: number): Promise<Response> {
   const r = await readJson(req);
   if (!r.ok) return r.res;
   const row = await byColumn(env, 'confirm_token', r.body.token);
   if (!row) return INVALID();
-  if (row.status === 'PENDING') {
-    // 恰好满 7 天的那一毫秒还有效，之后才算过期（C106）
-    if (now > Date.parse(row.confirm_sent_at) + RULES.confirmValidMs) return error(410, 'LINK_EXPIRED', 'confirm link expired');
-    await env.DB.prepare("UPDATE subscribers SET status = 'CONFIRMED', confirmed_at = ?1, updated_at = ?1 WHERE id = ?2 AND status = 'PENDING'")
+  if (row.status === 'PENDING' && expired(row, now)) return error(410, 'LINK_EXPIRED', 'confirm link expired', [], { key: row.invite_key });
+  const after = await confirmRow(env, row, now);
+  return json({ status: after.status.toLowerCase(), key: after.invite_key });
+}
+
+async function markUnsubscribed(env: Env, row: Row, now: number): Promise<void> {
+  if (row.status !== 'UNSUBSCRIBED') {
+    await env.DB.prepare("UPDATE subscribers SET status = 'UNSUBSCRIBED', unsubscribed_at = ?1, updated_at = ?1 WHERE id = ?2 AND status <> 'UNSUBSCRIBED'")
       .bind(iso(now), row.id)
       .run();
   }
-  const after = (await env.DB.prepare('SELECT * FROM subscribers WHERE id = ?1').bind(row.id).first<Row>())!;
-  const body: Record<string, unknown> = { status: after.status.toLowerCase(), lang: after.lang, beta: after.beta === 1 };
-  if (after.status === 'CONFIRMED') body.invite = inviteInfo(after, siteBase(env, req), await invitedCount(env.DB, after.invite_code));
-  return json(body);
 }
 
 export async function unsubscribe(req: Request, env: Env, now: number): Promise<Response> {
@@ -179,21 +270,8 @@ export async function unsubscribe(req: Request, env: Env, now: number): Promise<
   if (!r.ok) return r.res;
   const row = await byColumn(env, 'unsub_token', r.body.token);
   if (!row) return INVALID();
-  if (row.status !== 'UNSUBSCRIBED') {
-    await env.DB.prepare("UPDATE subscribers SET status = 'UNSUBSCRIBED', unsubscribed_at = ?1, updated_at = ?1 WHERE id = ?2 AND status <> 'UNSUBSCRIBED'")
-      .bind(iso(now), row.id)
-      .run();
-  }
-  return json({ status: 'unsubscribed', lang: row.lang });
-}
-
-/** GET /api/public/invite?k=…：确认过的返回邀请码、链接和人数；还没确认的只返回状态（不给邀请码） */
-export async function invite(req: Request, env: Env): Promise<Response> {
-  const row = await byColumn(env, 'invite_key', new URL(req.url).searchParams.get('k'));
-  if (!row) return INVALID();
-  const body: Record<string, unknown> = { status: row.status.toLowerCase(), lang: row.lang };
-  if (row.confirmed_at) body.invite = inviteInfo(row, siteBase(env, req), await invitedCount(env.DB, row.invite_code));
-  return json(body);
+  await markUnsubscribed(env, row, now);
+  return json({ status: 'unsubscribed', lang: row.lang, key: row.invite_key });
 }
 
 /**
