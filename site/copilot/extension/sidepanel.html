@@ -15,6 +15,7 @@
 <nav class="tabs" role="tablist">
   <button role="tab" data-tab="now" aria-selected="true">这条</button>
   <button role="tab" data-tab="today" aria-selected="false">今天</button>
+  <button role="tab" data-tab="log" aria-selected="false">日志</button>
   <button role="tab" data-tab="set" aria-selected="false">设置</button>
 </nav>
 
@@ -45,6 +46,12 @@
   <p id="today-sum" class="muted"></p>
   <div class="tablewrap"><table><thead><tr><th>时间</th><th>帖子</th><th>动作</th></tr></thead><tbody id="today-rows"></tbody></table></div>
   <button id="copy" class="btn">复制今天的记录（贴到晚上的小结）</button>
+</section>
+
+<section id="tab-log" class="sec" hidden>
+  <div class="lbl">插件在做什么（最近 200 条，只存在这台电脑，关掉侧边栏就清空）</div>
+  <div class="logbar"><button id="log-copy" class="btn">复制日志</button><button id="log-clear" class="btn">清空</button></div>
+  <ol id="log-list" class="log" aria-live="polite"></ol>
 </section>
 
 <section id="tab-set" class="sec" hidden>

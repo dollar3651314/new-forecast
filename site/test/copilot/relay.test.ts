@@ -109,6 +109,15 @@ describe('打分', () => {
     expect(j.detail).toBe('gemini-3.8-flash: HTTP 500');
     expect(JSON.stringify(j)).not.toContain('ci_only_gemini_key');
   });
+  it('思考强度设成 low；模型不认这个设置（400）就去掉再试一次', async () => {
+    const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ id: POST.id, score: 65, reasons: [] }] }) }] } }] };
+    const g = fakeGemini(new Response('bad field', { status: 400 }), new Response(JSON.stringify(ok), { status: 200 }));
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
+    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 65, reasons: [] }] });
+    const cfgs = g.calls.map((c) => (c.body as unknown as { generationConfig: Record<string, unknown> }).generationConfig);
+    expect(cfgs[0]).toMatchObject({ thinkingConfig: { thinkingLevel: 'low' } });
+    expect(cfgs[1].thinkingConfig).toBeUndefined();
+  });
   it('Gemini 超额（429）返回 503 + 30 秒后再试（2026-10-29 测试版：滚动几条就报错）', async () => {
     const g = fakeGemini(new Response('quota', { status: 429 }));
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);

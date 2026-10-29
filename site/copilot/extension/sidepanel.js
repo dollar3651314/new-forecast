@@ -8,6 +8,32 @@ let cfg = { relay: '', token: '', product: 'forecast' };
 let cur = null; // { platform, post, score, reasons, tabId, drafts, pick }
 const reasons = new Map(); // id -> reasons
 
+// ---- 日志（2026-10-29 Amos：能不能弄个类似日志一样的东西，让我可以看到它是否真的在工作）----
+const logs = [];
+let lastContentLog = 0;
+function addLog(text, level = 'info', from = '侧边栏') {
+  const t = new Date();
+  logs.unshift({ t, text, level, from });
+  logs.splice(200);
+  const li = document.createElement('li');
+  li.className = level;
+  const tm = document.createElement('time');
+  tm.textContent = t.toTimeString().slice(0, 8);
+  li.append(tm, document.createTextNode(`[${from}] ${text}`));
+  $('log-list').prepend(li);
+  while ($('log-list').children.length > 200) $('log-list').lastChild.remove();
+}
+$('log-copy').addEventListener('click', async () => {
+  const txt = logs.map((l) => `${l.t.toTimeString().slice(0, 8)} [${l.from}] ${l.text}`).join('\n');
+  try { await navigator.clipboard.writeText(txt); addLog('日志已复制'); } catch { addLog('复制失败，请手动选取', 'warn'); }
+});
+$('log-clear').addEventListener('click', () => { logs.length = 0; $('log-list').replaceChildren(); });
+addLog('侧边栏已打开');
+// 15 秒内没有收到任何页面的消息：多半是 X / Threads 页面在装插件之前就打开了
+setTimeout(() => { if (!lastContentLog) addLog('还没有收到 X / Threads 页面的消息：请把 X 或 Threads 的页面刷新一次（装或更新插件之前打开的页面不会被扫描）', 'warn'); }, 15_000);
+// 每分钟问一次页面"还在工作吗"
+setInterval(() => { chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t && chrome.tabs.sendMessage(t.id, { type: 'qc-ping' }).catch(() => {})); }, 60_000);
+
 function say(text, ok = false) { $('msg').textContent = text; $('msg').classList.toggle('ok', ok); $('msg').dataset.kind = ''; }
 function setNote(text, kind) { const n = $('set-msg'); n.textContent = text; n.className = 'msg' + (kind === 'ok' ? ' ok' : kind === 'busy' ? ' busy' : ''); }
 function setStatus(on, text) { $('status').textContent = text; $('status').classList.toggle('on', on); }
@@ -28,13 +54,21 @@ async function api(path, body) {
   return r.json();
 }
 
-// ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 10 条），Gemini 忙时停 30 秒再继续 ----
+// ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 5 条；10 条一批 Gemini 会超时），Gemini 忙时停 30 秒再继续 ----
 // （2026-10-29 Amos 测试版：滚动几条就报错——每 3 秒一次超过了 Gemini 免费档每分钟的上限）
 const SCORE_EVERY_MS = 10_000;
+let scoring = false; // 上一批还没回来就不送下一批（Gemini 最长要等 45 秒）
 const pending = []; // { tabId, platform, post }
 let pauseUntil = 0;
 chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg && msg.type === 'qc-log' && sender.tab) {
+    lastContentLog = Date.now();
+    addLog(msg.text, msg.level, msg.platform === 'x' ? 'X 页面' : 'Threads 页面');
+    return false;
+  }
   if (msg && msg.type === 'qc-posts' && sender.tab) {
+    lastContentLog = Date.now();
+    addLog(`收到 ${msg.posts.length} 条帖子，排队等打分（每 10 秒送一批）`);
     for (const post of msg.posts) if (!pending.some((p) => p.post.id === post.id)) pending.push({ tabId: sender.tab.id, platform: msg.platform, post });
     pending.splice(0, Math.max(0, pending.length - 40)); // 只留最近看到的 40 条
     return false;
@@ -45,12 +79,16 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   return false;
 });
 setInterval(async () => {
-  if (!pending.length || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  if (scoring || !pending.length || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  scoring = true;
   const first = pending[0];
-  const batch = pending.filter((p) => p.tabId === first.tabId && p.platform === first.platform).slice(0, 10);
+  const batch = pending.filter((p) => p.tabId === first.tabId && p.platform === first.platform).slice(0, 5);
   for (const b of batch) pending.splice(pending.indexOf(b), 1);
   try {
+    addLog(`送 ${batch.length} 条去打分…`);
     const r = await api('/v1/score', { product: cfg.product, platform: first.platform, posts: batch.map((b) => b.post) });
+    const good = r.items.filter((it) => it.score >= 60).length;
+    addLog(`打分完成：${r.items.length} 条，其中值得回 ${good} 条（分数：${r.items.map((it) => it.score).join('、')}）`);
     setStatus(true, '营销团队在线');
     if ($('msg').dataset.kind === 'score') say('');
     for (const it of r.items) reasons.set(it.id, it.reasons);
@@ -60,8 +98,11 @@ setInterval(async () => {
     if (e.busy) pauseUntil = Date.now() + 30_000;
     else pauseUntil = Date.now() + 60_000;
     setStatus(!!e.busy, e.busy ? '营销团队忙，稍等' : '未连接');
+    addLog('打分失败：' + e.message, e.busy ? 'warn' : 'error');
     say(e.message);
     $('msg').dataset.kind = 'score';
+  } finally {
+    scoring = false;
   }
 }, SCORE_EVERY_MS);
 
@@ -85,13 +126,16 @@ async function loadDrafts() {
   $('checks').hidden = true;
   say('');
   try {
+    addLog(`为 ${cur.post.author} 的帖子写草稿…`);
     const r = await api('/v1/draft', { product: cfg.product, platform: cur.platform, post: cur.post });
+    addLog(`草稿：通过检查 ${r.drafts.length} 条，拿掉 ${r.dropped} 条`);
     cur.drafts = r.drafts;
     cur.pick = 0;
     renderDrafts(r.dropped);
   } catch (e) {
     $('drafts').replaceChildren();
     say(e.message);
+    addLog('写草稿失败：' + e.message, 'error');
   }
 }
 
@@ -189,7 +233,7 @@ $('save').addEventListener('click', async () => {
 
 function switchTab(k) {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
-  for (const x of ['now', 'today', 'set']) $('tab-' + x).hidden = x !== k;
+  for (const x of ['now', 'today', 'log', 'set']) $('tab-' + x).hidden = x !== k;
   if (k === 'today') loadToday();
 }
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));

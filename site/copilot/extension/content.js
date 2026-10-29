@@ -7,6 +7,11 @@
   const platform = P.platformOf(location.hostname);
   if (!platform) return;
   const known = new Map(); // id -> { post, badge }
+  // 日志：送给侧边栏的"日志"页（侧边栏没开就丢掉），让 Amos 看到插件在不在工作（2026-10-29 Amos 要求）
+  const log = (text, level = 'info') => chrome.runtime.sendMessage({ type: 'qc-log', platform, level, text }).catch(() => {});
+  let lastCount = -1;
+  let emptyScans = 0;
+  log(`已在 ${platform === 'x' ? 'X' : 'Threads'} 页面启动（${location.pathname}）`);
   const queue = [];
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) {
@@ -19,7 +24,12 @@
   });
 
   function scan() {
-    for (const p of P.readPosts(document, location.hostname, Date.now())) {
+    const found = P.readPosts(document, location.hostname, Date.now());
+    if (found.length === 0) {
+      emptyScans += 1;
+      if (emptyScans === 4) log('这一页上读不到帖子：可能不在首页 / 时间线，或者平台改了页面结构。请截图日志给我们', 'warn');
+    } else emptyScans = 0;
+    for (const p of found) {
       if (known.has(p.id)) continue;
       p.el.setAttribute('data-qc-id', p.id);
       known.set(p.id, { post: { id: p.id, author: p.author, text: p.text.slice(0, 1000), replies: p.replies, ageMinutes: p.ageMinutes }, el: p.el });
@@ -50,6 +60,7 @@
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === 'qc-ping') log(`仍在工作：本页读到 ${known.size} 条，排队 ${queue.length} 条`);
     if (msg && msg.type === 'qc-scores' && msg.platform === platform) for (const it of msg.items) badge(it.id, it.score);
     if (msg && msg.type === 'qc-done' && known.has(msg.id)) {
       const b = known.get(msg.id).el.querySelector(':scope .qc-badge');
@@ -59,6 +70,10 @@
 
   setInterval(() => {
     scan();
+    if (known.size !== lastCount) {
+      lastCount = known.size;
+      if (known.size) log(`页面上累计读到 ${known.size} 条帖子，等待送去打分 ${queue.length} 条`);
+    }
     if (!queue.length) return;
     const batch = queue.splice(0, 10);
     chrome.runtime.sendMessage({ type: 'qc-posts', platform, posts: batch }).catch(() => {
