@@ -6,11 +6,12 @@
  * - POST /v1/log     {product, platform, postId, author?, score?, action: approve|skip|regenerate, draft?}  approve 超过每天上限 → 429
  * - GET  /v1/today   当天（台湾日期）的记录和计数，给插件"今天"页和晚上的小结
  * 令牌：Authorization: Bearer <COPILOT_TOKEN>（≥ 24 个字符）。COPILOT_TOKEN 或 GEMINI_API_KEY 没填时 /v1/* 全部 404（默认关着，C102）。
+ * Gemini 超额（429）返回 503 + retryAfter，插件自动排队再试；其他 Gemini 错误返回 502 + detail（原因，不含 Key）。
  * 来源：只接受 chrome-extension:// 的请求（有 ALLOWED_ORIGIN 时只接受那一个）；全站每分钟最多 30 次。
  */
 import { checkDraft, isExcludedTopic, type Platform } from './checks';
 import type { Env } from './env';
-import { askJson, GeminiError, type FetchLike } from './gemini';
+import { askJson, GeminiBusy, GeminiError, type FetchLike } from './gemini';
 import { FORECAST_RULES } from '../rules/forecast';
 
 const RULES: Record<string, string> = { forecast: FORECAST_RULES };
@@ -190,9 +191,14 @@ export async function handle(req: Request, env: Env, now: number, fetcher?: Fetc
     if (p === '/v1/log') return await log(env, body, now, origin!);
     return notFound();
   } catch (e) {
+    if (e instanceof GeminiBusy) {
+      console.log(JSON.stringify({ event: 'copilot.gemini_busy' }));
+      return json({ error: 'team busy', retryAfter: 30 }, 503, origin);
+    }
     if (e instanceof GeminiError) {
       console.log(JSON.stringify({ event: 'copilot.gemini_error', detail: e.message }));
-      return json({ error: 'team unavailable' }, 502, origin);
+      // detail 只有模型名和状态码（或"不是 JSON""超时"），不含 Key，给插件显示原因
+      return json({ error: 'team unavailable', detail: e.message }, 502, origin);
     }
     throw e;
   }

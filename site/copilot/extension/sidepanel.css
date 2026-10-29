@@ -27,7 +27,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 "Noto Sans TC"
 .btn{font:inherit;font-weight:700;border-radius:10px;padding:9px 12px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 .btn.primary{background:var(--teal);border-color:var(--teal);color:#0F1B33}.btn:disabled{opacity:.5;cursor:default}
 .btn:focus-visible,.draft:focus-visible,.tabs button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
-.msg{margin:0;font-size:13px;color:var(--err)}.msg.ok{color:var(--ok)}
+.msg{margin:0;font-size:13px;color:var(--err)}.msg.ok{color:var(--ok)}.msg.busy{color:var(--muted)}
+.msg:empty{display:none}
 .field{display:grid;gap:4px;font-size:13px}
 .field input,.field select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
 .tablewrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:12px}
