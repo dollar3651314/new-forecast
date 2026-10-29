@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick Come 副驾驶</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header class="brand">
+  <span class="logo" aria-hidden="true"><i class="l1"></i><i class="l2"></i></span>
+  <b>副驾驶</b>
+  <span id="status" class="status">未连接</span>
+</header>
+<nav class="tabs" role="tablist">
+  <button role="tab" data-tab="now" aria-selected="true">这条</button>
+  <button role="tab" data-tab="today" aria-selected="false">今天</button>
+  <button role="tab" data-tab="set" aria-selected="false">设置</button>
+</nav>
+
+<section id="tab-now" class="sec">
+  <div id="empty" class="empty">打开 X 或 Threads 首页往下滑，值得回的帖子下面会出现绿色的"值得回"标记。点一个标记，这里会出现回复草稿。</div>
+  <div id="cur" hidden>
+    <div class="lbl">帖子</div>
+    <p id="cur-author" class="muted"></p>
+    <p id="cur-text" class="post"></p>
+    <div class="lbl">值不值得回</div>
+    <div class="score"><span id="cur-score" class="n">–</span><span class="bar"><i id="cur-bar"></i></span></div>
+    <ul id="cur-why" class="why"></ul>
+    <div class="lbl">回复草稿（选一条）</div>
+    <div id="drafts" role="radiogroup" class="drafts"></div>
+    <div class="checks" id="checks" hidden><span>✓ 没有禁用说法</span><span>✓ 没提产品、没放链接</span><span>✓ 数字有来源</span></div>
+    <div class="actions">
+      <button id="ok" class="btn primary" disabled>同意，打开回复窗口</button>
+      <button id="again" class="btn">换一批</button>
+      <button id="skip" class="btn">跳过</button>
+    </div>
+    <p class="muted small">点"同意"后会打开平台官方的回复窗口，文字已经填好；看一眼没问题，由你自己按"回复"。</p>
+  </div>
+  <p id="msg" class="msg" role="status"></p>
+</section>
+
+<section id="tab-today" class="sec" hidden>
+  <div class="lbl">今天的回复</div>
+  <p id="today-sum" class="muted"></p>
+  <div class="tablewrap"><table><thead><tr><th>时间</th><th>帖子</th><th>动作</th></tr></thead><tbody id="today-rows"></tbody></table></div>
+  <button id="copy" class="btn">复制今天的记录（贴到晚上的小结）</button>
+</section>
+
+<section id="tab-set" class="sec" hidden>
+  <label class="field" for="relay">中转服务地址
+    <input id="relay" type="url" placeholder="https://quickcome-copilot.….workers.dev" autocomplete="off">
+  </label>
+  <label class="field" for="token">连接令牌（你自己填，不要发到对话里）
+    <input id="token" type="password" autocomplete="off">
+  </label>
+  <label class="field" for="product">推广的产品
+    <select id="product"><option value="forecast">Quick Come（forecast）</option></select>
+  </label>
+  <button id="save" class="btn primary">保存并测试连接</button>
+  <p class="muted small">插件不读也不存你的密码和登录信息，只读屏幕上已经显示的帖子文字。每天回复上限由中转服务控制（默认 10 条）。</p>
+</section>
+<script src="parse.js"></script>
+<script src="sidepanel.js"></script>
+</body>
+</html>

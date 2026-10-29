@@ -75,7 +75,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: 类型检查
         run: npm run typecheck
-      - name: 测试（Worker 接口、看板换源和超时、页面组件、三语文案、共用规则、脚本）
+      - name: 测试（Worker 接口、看板换源和超时、页面组件、三语文案、共用规则、脚本、副驾驶中转服务和插件）
         run: npm test
       - name: 构建
         run: npm run build
@@ -158,3 +158,7 @@ jobs:
         env:
           TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
         run: bash scripts/deploy.sh "$TARGET"
+      - name: 部署副驾驶中转服务（staging → quickcome-copilot-staging；main → quickcome-copilot；agents C133）
+        env:
+          TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        run: bash scripts/deploy-copilot.sh "$TARGET"
