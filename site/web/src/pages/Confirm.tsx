@@ -1,97 +1,62 @@
 /**
- * 确认订阅 /confirm?t=<确认码>：**打开页面不会自动确认**，要按"确认订阅"按钮（防止邮箱的链接扫描器替人确认）。
- * 成功后显示：订阅成功（勾了内测的多一句）、M-4 充值提醒、M-10 专属邀请链接和人数。
- * 出错分清：链接无效（404）、超过 7 天（410）、暂时连不上（重试）（C56）。
+ * 旧的确认链接 /confirm?t=<确认码>（v1 的确认邮件）：兼容跳转到专属页面 /subscription?k=…（v1.1）。
+ * 页面脚本调用 POST /api/public/confirm 换到私密密钥后跳转（和专属页面一样：GET 页面本身不确认，扫描器预先打开不会替人确认）。
+ * 出错分清：链接无效（404）、暂时连不上（重试）（C56）；过期（410）也给密钥，跳过去在专属页面上重寄。
  */
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { SimplePage } from '../components/Chrome';
-import { InvitePanel, type InviteInfo } from '../components/InvitePanel';
 import { useI18n } from '../i18n';
-import { api, errorText } from '../lib/api';
-
-interface ConfirmResult {
-  status: string;
-  beta: boolean;
-  invite?: InviteInfo;
-}
+import { errorText, type ApiError } from '../lib/api';
 
 export function Confirm() {
   const { t } = useI18n();
   const token = new URLSearchParams(location.search).get('t') ?? '';
-  const [busy, setBusy] = useState(false);
-  const [res, setRes] = useState<ConfirmResult | null>(null);
-  const [err, setErr] = useState<{ text: string; final: boolean } | null>(null);
-
-  async function go() {
-    setBusy(true);
+  const [err, setErr] = useState<ApiError | null>(token ? null : { kind: 'notFound' });
+  const go = useCallback(() => {
+    if (!token) return;
     setErr(null);
-    const r = await api<ConfirmResult>('/api/public/confirm', { body: { token } });
-    setBusy(false);
-    if (r.ok) return setRes(r.data);
-    if (r.error.kind === 'notFound') return setErr({ text: t('confirm.invalid'), final: true });
-    if (r.error.kind === 'expired') return setErr({ text: t('confirm.expired'), final: true });
-    const [k, v] = errorText(r.error);
-    setErr({ text: t(k, v), final: false });
-  }
-
-  if (!token) {
-    return (
-      <SimplePage>
-        <div className="panel">
-          <h3>{t('confirm.title')}</h3>
-          <p className="lead flat">{t('confirm.missing')}</p>
-          <p>
-            <a href="/">{t('common.home')}</a>
-          </p>
-        </div>
-      </SimplePage>
-    );
-  }
-
-  if (res && res.status === 'confirmed') {
-    return (
-      <SimplePage>
-        <div className="panel" data-testid="confirm-ok">
-          <div className="ok" aria-hidden="true">
-            ✓
-          </div>
-          <h3>{t('confirm.okTitle')}</h3>
-          <p className="lead flat">
-            {t('confirm.okBody')}
-            {res.beta ? ` ${t('confirm.okBeta')}` : ''}
-          </p>
-        </div>
-        <div className="panel" data-testid="deposit-tip">
-          <h3 className="h-sm">{t('confirm.depTitle')}</h3>
-          <p className="lead flat">{t('dep.short')}</p>
-        </div>
-        {res.invite && <InvitePanel invite={res.invite} showPrivateLink />}
-      </SimplePage>
-    );
-  }
-
+    // 直接用 fetch（不用 api.ts）：410 时也要读正文里的密钥
+    void fetch('/api/public/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token }),
+      credentials: 'same-origin',
+    })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => ({}))) as { key?: string };
+        if ((res.ok || res.status === 410) && body.key) return location.replace(`/subscription?k=${encodeURIComponent(body.key)}`);
+        setErr(res.status === 404 ? { kind: 'notFound' } : { kind: 'server' });
+      })
+      .catch(() => setErr({ kind: 'network' }));
+  }, [token]);
+  useEffect(go, [go]);
   return (
     <SimplePage>
-      <div className="panel" data-testid="confirm-pending">
-        <h3>{t('confirm.title')}</h3>
-        {res && res.status === 'unsubscribed' ? (
-          <p className="lead flat">{t('unsub.done')}</p>
-        ) : (
-          <>
-            <p className="lead">{t('confirm.lead')}</p>
-            {!(err && err.final) && (
-              <button className="btn" type="button" onClick={go} disabled={busy} data-testid="confirm-btn">
-                {busy ? t('confirm.working') : t('confirm.button')}
-              </button>
-            )}
-          </>
-        )}
-        {err && (
+      <h2 className="page-h">{t('sub.pageTitle')}</h2>
+      {!err && (
+        <div className="panel" data-testid="confirm-redirect">
+          <p className="lead flat">{t('confirm.working')}</p>
+        </div>
+      )}
+      {err?.kind === 'notFound' && (
+        <div className="panel" data-testid="sub-invalid">
+          <h3>{t('sub.invalidTitle')}</h3>
+          <p className="lead">{t('sub.invalidBody')}</p>
+          <a className="btn" href="/" style={{ textAlign: 'center', textDecoration: 'none' }}>
+            {t('sub.backToForm')}
+          </a>
+        </div>
+      )}
+      {err && err.kind !== 'notFound' && (
+        <div className="panel">
           <p className="form-err light" role="alert">
-            {err.text} {err.final && <a href="/">{t('common.home')}</a>}
+            {t(...errorText(err))}{' '}
+            <button type="button" className="linkbtn" onClick={go}>
+              {t('common.retry')}
+            </button>
           </p>
-        )}
-      </div>
+        </div>
+      )}
     </SimplePage>
   );
 }

@@ -75,6 +75,28 @@ describe('语言判断', () => {
   });
 });
 
+describe('页面上不出现内部编号和英文技术词（v1.1 Amos 验收）', () => {
+  const pages = JSON.stringify([MESSAGES, LEGAL]);
+  const admin = JSON.stringify(Object.entries(ADMIN).filter(([k]) => k !== '_说明'));
+  it.each([
+    ['公开页面', pages],
+    ['名单页', admin],
+  ])('%s：没有 M-数字、C-数字、JSON、ref、src、cmp、ADMIN_PASSWORD 这类写法', (_name, text) => {
+    expect(text).not.toMatch(/\bM-\d|\bC-?\d{2,3}\b|JSON|\bref\b|\bsrc\b|\bcmp\b|ADMIN_PASSWORD|qc-waitlist/);
+  });
+  it('内测勾选写明"选填"（三种语言）', () => {
+    expect(MESSAGES['zh-TW'].form.beta).toContain('（選填）');
+    expect(MESSAGES['zh-CN'].form.beta).toContain('（选填）');
+    expect(MESSAGES.en.form.beta).toContain('(optional)');
+  });
+  it('首页焦点战没有"上线后这里显示两边的人数和机率"', () => {
+    expect(pages).not.toMatch(/上線後這裡顯示|上线后这里显示/);
+  });
+  it('名单页登录失败的提示不说规则（几次、多久、锁定）', () => {
+    for (const k of ['authFailed', 'exportAuthFailed'] as const) expect(ADMIN[k]).not.toMatch(/\d|锁|分钟|次/);
+  });
+});
+
 describe('名单页文案', () => {
   it('焦点战的每个错误码都有文字', () => {
     for (const c of ['REQUIRED', 'TOO_LONG', 'TIME_FORMAT', 'TIME_INVALID']) expect(ADMIN).toHaveProperty(`e${c}`);

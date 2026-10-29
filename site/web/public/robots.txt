@@ -5,4 +5,5 @@ Disallow: /admin
 Disallow: /confirm
 Disallow: /unsubscribe
 Disallow: /invite
+Disallow: /subscription
 Sitemap: https://www.quickcome.online/sitemap.xml

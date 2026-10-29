@@ -6,7 +6,7 @@
 import { useEffect, useMemo } from 'react';
 import { Footer, EnvBanner, TopBar } from '../components/Chrome';
 import { Deposit, Faq, HowTo, Matches, ReturnRate } from '../components/Sections';
-import { SubscribeForm } from '../components/SubscribeForm';
+import { SubscribeForm, useSubscribeState } from '../components/SubscribeForm';
 import { useI18n } from '../i18n';
 import { currentAttribution, reportVisit } from '../lib/attribution';
 import { useIsDesktop, useSiteInfo } from '../lib/site';
@@ -17,6 +17,7 @@ export function Home() {
   const desktop = useIsDesktop();
   const attribution = useMemo(() => currentAttribution(location.search), []);
   useEffect(() => reportVisit(attribution), [attribution]);
+  const form = useSubscribeState();
   const pitch = (
     <>
       <div className="eyebrow">{t('hero.eyebrow')}</div>
@@ -40,7 +41,7 @@ export function Home() {
                 {pitch}
                 <ReturnRate />
               </div>
-              <SubscribeForm attribution={attribution} />
+              <SubscribeForm attribution={attribution} state={form} />
             </div>
           ) : (
             <div className="hero mobile" data-layout="mobile">
@@ -51,7 +52,7 @@ export function Home() {
                 {t('hero.title2')}
               </h1>
               <ReturnRateBars />
-              <SubscribeForm attribution={attribution} />
+              <SubscribeForm attribution={attribution} state={form} />
               <p className="sub">{t('hero.sub')}</p>
               <p className="foot">{t('hero.foot')}</p>
             </div>

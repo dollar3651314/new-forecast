@@ -112,7 +112,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: 端到端（留邮箱 → 确认 → 邀请 → 名单页 → 焦点战 → 导出 → 退订；测试版密码门）
+      - name: 端到端（留邮箱 → 确认邮件 → 专属页面 → 邀请 → 名单页 → 焦点战导入 → 导出 Excel → 退订；测试版不收录）
         run: node scripts/e2e-local.mjs --no-screenshots
 
   # 汇总：分支保护只把这一项设为"必须通过"。跳过的 job 算通过；任何一项失败或被取消，这里就失败

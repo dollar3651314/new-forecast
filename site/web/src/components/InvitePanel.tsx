@@ -1,24 +1,24 @@
-/** M-10：专属邀请链接 + "你邀请了几个人"（确认页和邀请查看页共用）。 */
+/** 专属邀请链接（一键复制）+ "你已邀请 N 人"（专属页面里用）。 */
 import { useState } from 'react';
 import { useI18n } from '../i18n';
 
 export interface InviteInfo {
   code: string;
-  key: string;
   link: string;
   count: number;
 }
 
-export function InvitePanel({ invite, showPrivateLink }: { invite: InviteInfo; showPrivateLink?: boolean }) {
+export function InvitePanel({ invite }: { invite: InviteInfo }) {
   const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'ok' | 'fail' | null>(null);
   async function copy() {
     try {
       await navigator.clipboard.writeText(invite.link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopied('ok');
+      setTimeout(() => setCopied(null), 2000);
     } catch {
-      /* 复制不了时用户可以手动选取 */
+      // 复制不了（例如浏览器不允许）：告诉用户手动复制
+      setCopied('fail');
     }
   }
   return (
@@ -29,19 +29,15 @@ export function InvitePanel({ invite, showPrivateLink }: { invite: InviteInfo; s
         <div className="reflink" data-testid="invite-link">
           {invite.link}
         </div>
-        <button type="button" className="btn small-btn" onClick={copy}>
-          {copied ? t('invite.copied') : t('invite.copy')}
+        <button type="button" className="btn small-btn" onClick={copy} data-testid="invite-copy">
+          {copied === 'ok' ? t('invite.copied') : t('invite.copy')}
         </button>
       </div>
+      {copied === 'fail' && <p className="small form-err light">{t('invite.copyFail')}</p>}
       <p className="count" data-testid="invite-count">
         {t('invite.count', { n: invite.count })}
       </p>
       <p className="small muted">{t('invite.countHint')}</p>
-      {showPrivateLink && (
-        <p className="small muted">
-          {t('invite.private')} <a href={`/invite?k=${invite.key}`}>{t('invite.privateLink')}</a>
-        </p>
-      )}
     </div>
   );
 }

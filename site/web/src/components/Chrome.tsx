@@ -22,7 +22,7 @@ export function EnvBanner({ info }: { info: SiteInfo | null }) {
   if (!info || info.environment === 'production') return null;
   return (
     <div className="envbar" role="note" data-testid="env-banner">
-      {t('env.banner')}（{info.environment}）
+      {t('env.banner')}
     </div>
   );
 }

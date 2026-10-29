@@ -12,6 +12,8 @@ import type { Env } from '../../worker/src/env';
 export const SITE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 /** 测试用的密码（不是任何环境的真实密码；≥ 16 个字符） */
 export const PW = 'ci_only_password_0123456789';
+/** 测试用的名单页地址（不是任何环境的真实地址） */
+export const AP = '/qc-ops-test-0001';
 /** 固定的"现在"：2026-10-29 04:00:00 UTC = 台湾时间 12:00 */
 export const T0 = Date.UTC(2026, 9, 29, 4, 0, 0);
 
@@ -52,6 +54,7 @@ export function testEnv(db: D1Database, over: Partial<Env> = {}): Env {
     MAIL_FROM: 'Quick Come <noreply@mail.example.test>',
     RESEND_API_KEY: 'ci_only_resend_key',
     ADMIN_PASSWORD: PW,
+    ADMIN_PATH: AP,
     ...over,
   };
 }
@@ -72,7 +75,7 @@ export function testCtx(): ExecutionContext & { flush(): Promise<void> } {
 
 export interface Sent {
   auth: string | null;
-  body: { from: string; to: string[]; subject: string; text: string; headers?: Record<string, string> };
+  body: { from: string; to: string[]; subject: string; text: string; html?: string; headers?: Record<string, string> };
 }
 
 /** 替身：拦下全局 fetch。Resend 记下邮件、返回 resendStatus；其他地址交给 handlers（按 URL 前缀），没有的 599 */
@@ -127,14 +130,21 @@ export function cookieFrom(res: Response, name: string): string {
   return '';
 }
 
-/** 留邮箱 → 从替身邮件里拿链接 → 确认，返回各个链接 */
+/** 邮件里专属页面的链接（纯文本版里唯一的链接）和退订地址（邮件头 List-Unsubscribe） */
+export function mailLinks(mail: Sent): { pageUrl: string; key: string; unsubUrl: string } {
+  const pageUrl = links(mail.body.text)[0];
+  const unsubUrl = (mail.body.headers?.['List-Unsubscribe'] ?? '').replace(/^<|>$/g, '');
+  return { pageUrl, key: param(pageUrl, 'k'), unsubUrl };
+}
+
+/** 留邮箱 → 从替身邮件里拿专属页面的链接 → 打开（页面脚本 POST 确认），返回链接和专属页面的回答 */
 export async function subscribeAndConfirm(env: Env, mails: Sent[], email: string, extra: Record<string, unknown> = {}, now = T0) {
   const before = mails.length;
   const r = await call(env, req('POST', '/api/public/subscribe', { body: { email, lang: 'zh-TW', ...extra }, ip: freshIp() }), now);
   if (r.status !== 200) throw new Error(`subscribe ${r.status}`);
   const mail = mails[before];
   if (!mail) throw new Error('no mail sent');
-  const [confirmUrl, inviteUrl, unsubUrl] = links(mail.body.text);
-  const c = await call(env, req('POST', '/api/public/confirm', { body: { token: param(confirmUrl, 't') }, ip: freshIp() }), now);
-  return { confirmUrl, inviteUrl, unsubUrl, confirmRes: (await c.json()) as Record<string, unknown> };
+  const l = mailLinks(mail);
+  const c = await call(env, req('POST', '/api/public/subscription', { body: { key: l.key }, ip: freshIp() }), now);
+  return { ...l, confirmRes: (await c.json()) as Record<string, unknown> };
 }

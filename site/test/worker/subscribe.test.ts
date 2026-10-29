@@ -1,7 +1,7 @@
-/** 留邮箱、确认、退订、邀请、访问计数（M-6、M-9、M-10）。外部发信用替身，时间固定（C106）。 */
+/** 留邮箱、专属页面（打开就确认、刷新、退订、重新订阅、过期重寄）、旧链接兼容、退订链接、邀请、访问计数。外部发信用替身，时间固定（C106）。 */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RULES } from '../../worker/src/subscribe';
-import { call, freshIp, links, newDb, param, req, stubFetch, subscribeAndConfirm, T0, testEnv } from './helpers';
+import { call, freshIp, links, mailLinks, newDb, param, req, stubFetch, subscribeAndConfirm, T0, testEnv } from './helpers';
 
 let db: D1Database;
 let dispose: () => Promise<void>;
@@ -24,7 +24,7 @@ async function row(email: string) {
 }
 
 describe('留邮箱', () => {
-  it('新邮箱：回答 check_email，记为待确认，存来源和内测，发一封三个链接的确认邮件', async () => {
+  it('新邮箱：回答 check_email，记为待确认，存来源和内测，发一封确认邮件：只有一个链接（专属页面），HTML 版有按钮', async () => {
     const { env, mails } = setup();
     const email = uniq();
     const r = await call(env, req('POST', '/api/public/subscribe', { body: { email: `  ${email} `, lang: 'zh-TW', beta: true, src: 'threads', cmp: 'tw1', ref: 'nope!' }, ip: freshIp() }));
@@ -38,11 +38,17 @@ describe('留邮箱', () => {
     expect(mails).toHaveLength(1);
     expect(mails[0].body.to).toEqual([email.toLowerCase()]);
     expect(mails[0].auth).toBe('Bearer ci_only_resend_key');
-    const [c, i, u] = links(mails[0].body.text);
-    expect(c).toBe(`https://www.example.test/confirm?t=${x!.confirm_token}`);
-    expect(i).toBe(`https://www.example.test/invite?k=${x!.invite_key}`);
-    expect(u).toBe(`https://www.example.test/unsubscribe?t=${x!.unsub_token}`);
-    expect(mails[0].body.headers?.['List-Unsubscribe']).toBe(`<${u}>`);
+    const page = `https://www.example.test/subscription?k=${x!.invite_key}&lang=zh-TW`;
+    // 纯文本版：只有专属页面这一个链接（按钮打不开时的备用链接也是它）
+    expect(links(mails[0].body.text)).toEqual([page]);
+    // HTML 版：按钮和备用文字链接都指向同一个地址，没有别的链接
+    const hrefs = [...mails[0].body.html!.matchAll(/href="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+    expect(hrefs).toEqual([page, page]);
+    expect(mails[0].body.html).toContain('background:#2DD4BF');
+    // 退订放在邮件头（邮件软件的"取消订阅"），不在正文里另放链接
+    expect(mails[0].body.headers?.['List-Unsubscribe']).toBe(`<https://www.example.test/unsubscribe?t=${x!.unsub_token}>`);
+    // 邮件里不出现内部编号
+    expect(mails[0].body.text + mails[0].body.html).not.toMatch(/\bM-\d|\bC-?\d{2,3}\b|confirm\?t=|invite\?k=/);
     // 不是正式版：标题带测试标识（C34）
     expect(mails[0].body.subject.startsWith('[測試環境] ')).toBe(true);
   });
@@ -147,70 +153,126 @@ describe('留邮箱', () => {
   });
 });
 
-describe('确认', () => {
-  it('打开链接本身不会确认（确认只有 POST）；按确认后才是 CONFIRMED，返回邀请码和私密密钥', async () => {
+describe('专属页面（打开就确认）', () => {
+  it('打开链接（GET 页面）不会确认——邮件扫描器预先打开不算；页面脚本 POST 后才确认，返回订阅成功、内测、邀请链接和人数', async () => {
     const { env, mails } = setup();
     const email = uniq('c');
     await call(env, req('POST', '/api/public/subscribe', { body: { email, beta: true }, ip: freshIp() }));
-    const confirmUrl = links(mails[0].body.text)[0];
-    // 浏览器打开 /confirm?t=… 只拿到页面（静态资源），状态不变
-    const page = await call(env, new Request(confirmUrl));
-    expect(await page.text()).toBe('asset:/confirm');
+    const { pageUrl, key } = mailLinks(mails[0]);
+    // 浏览器 / 扫描器打开 /subscription?k=… 只拿到页面（静态资源），状态不变
+    const page = await call(env, new Request(pageUrl));
+    expect(await page.text()).toBe('asset:/subscription');
     expect((await row(email))!.status).toBe('PENDING');
-    // GET 确认接口不存在
-    expect((await call(env, req('GET', `/api/public/confirm?t=${param(confirmUrl, 't')}`))).status).toBe(404);
-    const r = await call(env, req('POST', '/api/public/confirm', { body: { token: param(confirmUrl, 't') } }), T0 + 5 * MIN);
+    // GET 接口不存在（不会因为 GET 确认）
+    expect((await call(env, req('GET', `/api/public/subscription?k=${key}`))).status).toBe(404);
+    expect((await row(email))!.status).toBe('PENDING');
+    const r = await call(env, req('POST', '/api/public/subscription', { body: { key } }), T0 + 5 * MIN);
     expect(r.status).toBe(200);
-    const body = (await r.json()) as { status: string; beta: boolean; invite: { code: string; key: string; link: string; count: number } };
     const x = await row(email);
-    expect(body).toMatchObject({ status: 'confirmed', lang: 'zh-TW', beta: true });
-    expect(body.invite).toEqual({ code: x!.invite_code, key: x!.invite_key, link: `https://www.example.test/?ref=${x!.invite_code}`, count: 0 });
+    expect(await r.json()).toEqual({
+      status: 'confirmed',
+      lang: 'zh-TW',
+      beta: true,
+      invite: { code: x!.invite_code, link: `https://www.example.test/?ref=${x!.invite_code}`, count: 0 },
+    });
     expect(x).toMatchObject({ status: 'CONFIRMED', confirmed_at: new Date(T0 + 5 * MIN).toISOString() });
-    // 重复确认：没有效果，确认时间不变
-    await call(env, req('POST', '/api/public/confirm', { body: { token: param(confirmUrl, 't') } }), T0 + 9 * MIN);
-    expect((await row(email))!.confirmed_at).toBe(new Date(T0 + 5 * MIN).toISOString());
   });
 
-  it('确认链接 7 天有效：恰好满 7 天那一毫秒还能确认，再晚 1 毫秒 410', async () => {
+  it('刷新（再打开一次）：还是同一个页面内容，确认时间不变', async () => {
+    const { env, mails } = setup();
+    const email = uniq('refresh');
+    const { key, confirmRes } = await subscribeAndConfirm(env, mails, email);
+    const again = await call(env, req('POST', '/api/public/subscription', { body: { key } }), T0 + 9 * MIN);
+    expect(await again.json()).toEqual(confirmRes);
+    expect((await row(email))!.confirmed_at).toBe(new Date(T0).toISOString());
+  });
+
+  it('在专属页面退订 → 显示已退订（不给邀请链接）；刷新仍是已退订；重新订阅 → 回到订阅成功', async () => {
+    const { env, mails } = setup();
+    const email = uniq('pg-un');
+    const { key } = await subscribeAndConfirm(env, mails, email);
+    const u = await call(env, req('POST', '/api/public/subscription/unsubscribe', { body: { key } }), T0 + MIN);
+    expect(await u.json()).toEqual({ status: 'unsubscribed', lang: 'zh-TW', beta: false });
+    expect(await row(email)).toMatchObject({ status: 'UNSUBSCRIBED', unsubscribed_at: new Date(T0 + MIN).toISOString() });
+    // 刷新：打开专属页面不会把退订的人重新确认
+    expect(await (await call(env, req('POST', '/api/public/subscription', { body: { key } }), T0 + 2 * MIN)).json()).toEqual({ status: 'unsubscribed', lang: 'zh-TW', beta: false });
+    expect((await row(email))!.status).toBe('UNSUBSCRIBED');
+    const re = await call(env, req('POST', '/api/public/subscription/resubscribe', { body: { key } }), T0 + 3 * MIN);
+    expect(await re.json()).toMatchObject({ status: 'confirmed', invite: { count: 0 } });
+    expect(await row(email)).toMatchObject({ status: 'CONFIRMED', unsubscribed_at: null, confirmed_at: new Date(T0 + 3 * MIN).toISOString() });
+  });
+
+  it('确认链接 7 天有效：恰好满 7 天那一毫秒还能确认，再晚 1 毫秒 410；过期后可以重寄（同一个地址，从现在起再算 7 天），重寄后能确认', async () => {
     const { env, mails } = setup();
     const a = uniq('exp');
     const b = uniq('exp');
     await call(env, req('POST', '/api/public/subscribe', { body: { email: a }, ip: freshIp() }));
     await call(env, req('POST', '/api/public/subscribe', { body: { email: b }, ip: freshIp() }));
-    const ta = param(links(mails[0].body.text)[0], 't');
-    const tb = param(links(mails[1].body.text)[0], 't');
-    expect((await call(env, req('POST', '/api/public/confirm', { body: { token: ta } }), T0 + RULES.confirmValidMs)).status).toBe(200);
-    const late = await call(env, req('POST', '/api/public/confirm', { body: { token: tb } }), T0 + RULES.confirmValidMs + 1);
+    const ka = mailLinks(mails[0]).key;
+    const kb = mailLinks(mails[1]).key;
+    expect((await call(env, req('POST', '/api/public/subscription', { body: { key: ka } }), T0 + RULES.confirmValidMs)).status).toBe(200);
+    const late = await call(env, req('POST', '/api/public/subscription', { body: { key: kb } }), T0 + RULES.confirmValidMs + 1);
     expect(late.status).toBe(410);
     expect(await late.json()).toMatchObject({ code: 'LINK_EXPIRED' });
+    const t1 = T0 + RULES.confirmValidMs + MIN;
+    const rs = await call(env, req('POST', '/api/public/subscription/resend', { body: { key: kb }, ip: freshIp() }), t1);
+    expect(await rs.json()).toMatchObject({ status: 'pending', sent: true });
+    expect(mails).toHaveLength(3);
+    expect(mailLinks(mails[2]).key).toBe(kb);
+    // 刚寄过：10 分钟内再按是 429（专属页面上显示"剛剛已經寄過了"）
+    expect((await call(env, req('POST', '/api/public/subscription/resend', { body: { key: kb }, ip: freshIp() }), t1 + MIN)).status).toBe(429);
+    expect((await call(env, req('POST', '/api/public/subscription', { body: { key: kb } }), t1 + 2 * MIN)).status).toBe(200);
+    expect((await row(b))!.status).toBe('CONFIRMED');
   });
 
-  it('随机串不对：404（和"暂时出错"分开）', async () => {
-    const { env } = setup();
-    for (const token of ['f'.repeat(32), 'xyz', 123]) {
-      const r = await call(env, req('POST', '/api/public/confirm', { body: { token } }));
+  it('密钥不对：404（和"暂时出错"分开）；邀请码当密钥也查不到', async () => {
+    const { env, mails } = setup();
+    for (const key of ['f'.repeat(32), 'xyz', 123]) {
+      const r = await call(env, req('POST', '/api/public/subscription', { body: { key } }));
       expect(r.status).toBe(404);
       expect(await r.json()).toMatchObject({ code: 'LINK_INVALID' });
     }
+    const { confirmRes } = await subscribeAndConfirm(env, mails, uniq('code'));
+    const code = (confirmRes.invite as { code: string }).code;
+    expect((await call(env, req('POST', '/api/public/subscription', { body: { key: code } }))).status).toBe(404);
+  });
+
+  it('旧链接兼容：v1 的 /confirm?t= 确认后返回专属页面的密钥；过期也给密钥（到专属页面上重寄）', async () => {
+    const { env, mails } = setup();
+    const email = uniq('legacy');
+    await call(env, req('POST', '/api/public/subscribe', { body: { email }, ip: freshIp() }));
+    const x = await row(email);
+    const r = await call(env, req('POST', '/api/public/confirm', { body: { token: x!.confirm_token } }), T0 + MIN);
+    expect(await r.json()).toEqual({ status: 'confirmed', key: x!.invite_key });
+    expect((await row(email))!.status).toBe('CONFIRMED');
+    const e2 = uniq('legacy');
+    await call(env, req('POST', '/api/public/subscribe', { body: { email: e2 }, ip: freshIp() }));
+    const y = await row(e2);
+    const late = await call(env, req('POST', '/api/public/confirm', { body: { token: y!.confirm_token } }), T0 + RULES.confirmValidMs + 1);
+    expect(late.status).toBe(410);
+    expect(await late.json()).toMatchObject({ code: 'LINK_EXPIRED', key: y!.invite_key });
+    expect((await call(env, req('POST', '/api/public/confirm', { body: { token: '0'.repeat(32) } }))).status).toBe(404);
+    expect(mails.length).toBeGreaterThan(0);
   });
 });
 
-describe('退订', () => {
-  it('不用登录，按按钮退订；重复也成功；退订后再留邮箱重新走确认（新确认链接，邀请码不变）', async () => {
+describe('退订链接（邮件头 List-Unsubscribe）', () => {
+  it('不用登录，按按钮退订；重复也成功；返回专属页面的密钥（页面上给"重新订阅"入口）；退订后再留邮箱重新走确认（同一个专属页面，邀请码不变）', async () => {
     const { env, mails } = setup();
     const email = uniq('un');
-    const { unsubUrl } = await subscribeAndConfirm(env, mails, email);
+    const { unsubUrl, key } = await subscribeAndConfirm(env, mails, email);
     const code = (await row(email))!.invite_code;
     const r = await call(env, req('POST', '/api/public/unsubscribe', { body: { token: param(unsubUrl, 't') } }), T0 + MIN);
-    expect(await r.json()).toEqual({ status: 'unsubscribed', lang: 'zh-TW' });
+    expect(await r.json()).toEqual({ status: 'unsubscribed', lang: 'zh-TW', key });
     expect(await row(email)).toMatchObject({ status: 'UNSUBSCRIBED' });
     expect((await call(env, req('POST', '/api/public/unsubscribe', { body: { token: param(unsubUrl, 't') } }))).status).toBe(200);
     const before = mails.length;
     await call(env, req('POST', '/api/public/subscribe', { body: { email }, ip: freshIp() }), T0 + 20 * MIN);
     expect(mails.length).toBe(before + 1);
-    const x = await row(email);
-    expect(x).toMatchObject({ status: 'PENDING', invite_code: code });
-    expect(links(mails[before].body.text)[0]).not.toBe(links(mails[0].body.text)[0]);
+    expect(await row(email)).toMatchObject({ status: 'PENDING', invite_code: code });
+    expect(mailLinks(mails[before]).key).toBe(key);
+    expect((await call(env, req('POST', '/api/public/subscription', { body: { key } }), T0 + 21 * MIN)).status).toBe(200);
+    expect((await row(email))!.status).toBe('CONFIRMED');
   });
 
   it('退订码不对：404', async () => {
@@ -219,30 +281,23 @@ describe('退订', () => {
   });
 });
 
-describe('邀请（M-10）', () => {
-  it('?ref=邀请码 进来并确认的算一次邀请；只留不确认的不算；本人用私密链接看人数，不需要登录', async () => {
+describe('邀请', () => {
+  it('?ref=邀请码 进来并确认的算一次邀请；只留不确认的不算；本人刷新专属页面看到人数 +1，不需要登录', async () => {
     const { env, mails } = setup();
     const owner = uniq('owner');
-    const { inviteUrl, confirmRes } = await subscribeAndConfirm(env, mails, owner);
+    const { key, confirmRes } = await subscribeAndConfirm(env, mails, owner);
     const code = (confirmRes.invite as { code: string }).code;
     // 两个朋友：一个确认、一个只留不确认；邀请码大小写不论
     await subscribeAndConfirm(env, mails, uniq('friend'), { ref: code.toLowerCase(), src: 'x' });
     await call(env, req('POST', '/api/public/subscribe', { body: { email: uniq('lazy'), ref: code }, ip: freshIp() }));
-    const key = param(inviteUrl, 'k');
-    const r = await call(env, req('GET', `/api/public/invite?k=${key}`));
-    expect(r.status).toBe(200);
+    const r = await call(env, req('POST', '/api/public/subscription', { body: { key } }));
     expect(await r.json()).toMatchObject({ status: 'confirmed', invite: { code, count: 1, link: `https://www.example.test/?ref=${code}` } });
-    // 用邀请码当密钥查不到（私密链接的密钥和邀请码不同）
-    expect((await call(env, req('GET', `/api/public/invite?k=${code}`))).status).toBe(404);
   });
 
-  it('没确认的人：私密页只返回状态，不给邀请码；别人拿他的码进来不算邀请', async () => {
+  it('没确认的人的邀请码：别人拿着进来不算邀请', async () => {
     const { env, mails } = setup();
     const email = uniq('pend');
     await call(env, req('POST', '/api/public/subscribe', { body: { email }, ip: freshIp() }));
-    const key = param(links(mails[0].body.text)[1], 'k');
-    const body = await (await call(env, req('GET', `/api/public/invite?k=${key}`))).json();
-    expect(body).toEqual({ status: 'pending', lang: 'zh-TW' });
     const code = (await row(email))!.invite_code as string;
     const f = uniq('f2');
     await subscribeAndConfirm(env, mails, f, { ref: code });

@@ -120,7 +120,7 @@ const privacyTw: LegalDoc = {
   sections: [
     {
       h: '1. 我們收集的資料',
-      p: ['你留下的電子信箱、介面語言、是否勾選「願意參加內測」；網址上的來源參數（src、cmp、ref，例如從哪個社群貼文點進來）；送出時 IP 位址的雜湊值（只存不可還原的結果，不存原文）；留信箱、確認、退訂的時間。'],
+      p: ['你留下的電子信箱、介面語言、是否勾選「願意參加內測」；網址上的來源標記（例如從哪個社群貼文、哪位訂閱者的邀請連結點進來）；送出時 IP 位址的雜湊值（只存不可還原的結果，不存原文）；留信箱、確認、退訂的時間。'],
     },
     {
       h: '2. 我們怎樣使用',
@@ -143,7 +143,7 @@ const privacyZh: LegalDoc = {
   sections: [
     {
       h: '1. 我们收集的信息',
-      p: ['你留下的邮箱、界面语言、是否勾选"愿意参加内测"；网址上的来源参数（src、cmp、ref，例如从哪个社交媒体帖子点进来）；提交时 IP 地址的哈希值（只存不可还原的结果，不存原文）；留邮箱、确认、退订的时间。'],
+      p: ['你留下的邮箱、界面语言、是否勾选"愿意参加内测"；网址上的来源标记（例如从哪个社交媒体帖子、哪位订阅者的邀请链接点进来）；提交时 IP 地址的哈希值（只存不可还原的结果，不存原文）；留邮箱、确认、退订的时间。'],
     },
     {
       h: '2. 我们怎样使用',
@@ -166,7 +166,7 @@ const privacyEn: LegalDoc = {
   sections: [
     {
       h: '1. Information we collect',
-      p: ['The email you leave, your interface language and whether you ticked "I’d like to join the beta"; source parameters in the address (src, cmp, ref, e.g. which social post you came from); a hash of your IP address when you submit (only the irreversible hash is stored, never the address itself); and the times you subscribed, confirmed or unsubscribed.'],
+      p: ['The email you leave, your interface language and whether you ticked "I’d like to join the beta"; source tags in the address (e.g. which social post or which subscriber’s invite link you came from); a hash of your IP address when you submit (only the irreversible hash is stored, never the address itself); and the times you subscribed, confirmed or unsubscribed.'],
     },
     {
       h: '2. How we use it',

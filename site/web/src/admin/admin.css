@@ -21,7 +21,7 @@ td.acts, .acts { white-space: nowrap; display: flex; gap: 12px; }
 .filters select { width: auto; }
 .cards { display: grid; gap: 8px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-.mform { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr 1.4fr; gap: 10px; align-items: start; }
+.mform { display: grid; grid-template-columns: 1fr 1fr 1fr 1.3fr 1.3fr; gap: 10px; align-items: start; }
 .mform .mf { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .mform .mf.bad input { border-color: var(--err); }
 .mform .mf em { color: var(--err); font-style: normal; font-size: 12.5px; }
@@ -35,4 +35,18 @@ td.acts, .acts { white-space: nowrap; display: flex; gap: 12px; }
 @media (max-width: 760px) {
   .kpis { grid-template-columns: repeat(2, 1fr); }
   .mform { grid-template-columns: 1fr; }
+}
+/* v1.1：来源转化和邀请排行并排；焦点战的下拉和日期时间选择器；批量导入的预览 */
+.two { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; align-items: start; }
+.mform select, .mform input[type='datetime-local'] { width: 100%; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); font: inherit; background: #fff; color: var(--ink); }
+.mform .mf.bad select { border-color: var(--err); }
+.mform .mf input + input, .mform .mf select + input { margin-top: 6px; }
+.import { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.filebtn { position: relative; overflow: hidden; display: inline-block; cursor: pointer; }
+.filebtn input[type='file'] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.preview { margin-top: 12px; display: grid; gap: 10px; }
+tr.bad td { background: #fff4f2; }
+ul.errs { margin: 0; padding-left: 18px; color: var(--err); font-size: 13px; }
+@media (max-width: 760px) {
+  .two { grid-template-columns: 1fr; }
 }

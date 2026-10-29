@@ -34,12 +34,12 @@ export function ReturnRate() {
   );
 }
 
+/** 首页的焦点战卡片只显示联赛、对战、开赛时间（台湾时间）；没有比例条（v1.1 Amos 验收） */
 export interface Match {
   id: number;
   league: string;
   title: string;
   startsAt: string;
-  note: string;
 }
 
 export interface Btc {
@@ -120,14 +120,12 @@ export function Matches() {
               <span className="lg">{x.league}</span>
               <span className="t">{x.title}</span>
               <span className="when">{kickoff(x.startsAt, lang)}</span>
-              <span className="note">{x.note || t('matches.note')}</span>
             </div>
           ) : (
             <div className="li" key={x.id} data-testid="match">
               <div className="li-main">
                 <span className="lg">{x.league}</span>
                 <span className="t">{x.title}</span>
-                {x.note && <span className="note">{x.note}</span>}
               </div>
               <span className="when">{kickoff(x.startsAt, lang)}</span>
             </div>

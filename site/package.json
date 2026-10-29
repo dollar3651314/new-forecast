@@ -1,9 +1,9 @@
 {
   "name": "new-forecast-site",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Quick Come 官网 / 等候页 / 名单页 v1：Cloudflare Worker（静态资源 + D1 + Cron）+ Vite React 页面",
+  "description": "Quick Come 官网 / 等候页 / 名单页 v1.1：Cloudflare Worker（静态资源 + D1 + Cron）+ Vite React 页面",
   "scripts": {
     "typecheck": "tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261006.1",

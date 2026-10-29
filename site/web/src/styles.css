@@ -81,6 +81,11 @@ h1 { font-size: 40px; line-height: 1.25; margin: 8px 0 12px; font-weight: 900; c
 .form .small { font-size: 12.5px; color: #8e9ab3; margin-top: 10px; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--teal-d); text-decoration: underline; font: inherit; cursor: pointer; }
 .linkbtn.danger { color: var(--err); }
+.form.done { text-align: left; }
+.form .done-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--teal); color: var(--navy); font-weight: 900; font-size: 22px; margin-bottom: 10px; }
+.form .done-body { color: #e8ecf5; font-size: 15px; overflow-wrap: anywhere; }
+.form .linkbtn.quiet { color: #8e9ab3; font-size: 13px; margin-top: 6px; }
+.linkbtn.quiet { color: var(--muted); font-size: 13px; }
 
 /* 内容区 */
 section.blk { padding-block: 34px; }
@@ -128,6 +133,11 @@ footer a { color: #cfd7e6; }
 .reflink { flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; background: #0b1528; color: #e8ecf5; padding: 9px 12px; border-radius: 6px; overflow-wrap: anywhere; }
 .count { font-weight: 700; font-size: 17px; margin: 12px 0 0; }
 .ok-msg { color: var(--teal-d); font-weight: 700; }
+.panel .btn + .btn { margin-top: 8px; }
+.btns { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btns .btn { width: auto; padding-inline: 18px; }
+.btn.ghost-light { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.unsub-row { padding: 4px 2px; }
 .legal { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 22px; }
 .legal h1 { color: var(--ink); font-size: 28px; margin: 8px 0; }
 .legal h2 { font-size: 17px; margin: 20px 0 6px; }
