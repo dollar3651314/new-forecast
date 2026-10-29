@@ -47,7 +47,7 @@ const termsTw: LegalDoc = {
     { h: '5. 內測', p: ['勾選「願意參加內測」只表示你的意願，不保證一定會被邀請；內測開始前我們會另外寄信聯絡。'] },
     {
       h: '6. 網站上的資料',
-      p: ['返獎率對照、焦點戰和 BTC 行情只供參考。焦點戰的開賽時間以各聯賽官方公布為準；BTC 行情來自 OKX 或幣安的公開資料，每 5 分鐘更新一次，可能延遲或暫時取不到。'],
+      p: ['返獎率對照、焦點戰和 BTC 行情只供參考。焦點戰的開賽時間以各聯賽官方公布為準；BTC 行情來自 OKX、幣安、KuCoin、Gate 或 Kraken 的公開資料，每 5 分鐘更新一次，可能延遲或暫時取不到。'],
     },
     { h: '7. 年齡和所在地區', p: ['你需要年滿 18 歲，並自行確認在你所在的國家或地區使用預測產品是合法的。'] },
     { h: '8. 條款變更和聯絡', p: ['本條款可能隨產品上線更新，更新後的版本公布在本頁。聯絡信箱：待提供。'] },
@@ -77,7 +77,7 @@ const termsZh: LegalDoc = {
     { h: '5. 内测', p: ['勾选"愿意参加内测"只表示你的意愿，不保证一定会被邀请；内测开始前我们会另外发邮件联系。'] },
     {
       h: '6. 网站上的数据',
-      p: ['返奖率对照、焦点战和 BTC 行情只供参考。焦点战的开赛时间以各联赛官方公布为准；BTC 行情来自 OKX 或币安的公开数据，每 5 分钟更新一次，可能延迟或暂时取不到。'],
+      p: ['返奖率对照、焦点战和 BTC 行情只供参考。焦点战的开赛时间以各联赛官方公布为准；BTC 行情来自 OKX、币安、KuCoin、Gate 或 Kraken 的公开数据，每 5 分钟更新一次，可能延迟或暂时取不到。'],
     },
     { h: '7. 年龄和所在地区', p: ['你需要年满 18 周岁，并自行确认在你所在的国家或地区使用预测产品是合法的。'] },
     { h: '8. 条款变更和联系', p: ['本条款可能随产品上线更新，更新后的版本公布在本页。联系邮箱：待提供。'] },
@@ -107,7 +107,7 @@ const termsEn: LegalDoc = {
     { h: '5. Beta', p: ['Ticking "I’d like to join the beta" only records your interest and does not guarantee an invitation; we will email you separately before the beta starts.'] },
     {
       h: '6. Information on the Website',
-      p: ['The return-rate comparison, featured games and BTC data are for reference only. Kick-off times follow each league’s official schedule; BTC data comes from OKX or Binance public market data, is refreshed every 5 minutes, and may be delayed or temporarily unavailable.'],
+      p: ['The return-rate comparison, featured games and BTC data are for reference only. Kick-off times follow each league’s official schedule; BTC data comes from OKX, Binance, KuCoin, Gate or Kraken public market data, is refreshed every 5 minutes, and may be delayed or temporarily unavailable.'],
     },
     { h: '7. Age and location', p: ['You must be at least 18 and are responsible for making sure that using a prediction product is lawful where you live.'] },
     { h: '8. Changes and contact', p: ['These Terms may be updated as the product launches; the current version is published on this page. Contact email: to be provided.'] },

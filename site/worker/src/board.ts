@@ -3,7 +3,7 @@
  * 口径：最近 25 根 1 小时 K 线，只算已经收盘的（收盘时间早于现在）最后 24 根；收盘价 ≥ 开盘价算涨；比例 1 位小数四舍五入；现价是最新一根的收盘价（2 位小数）。
  * - **不在页面请求里取**：定时任务（Cron，每 5 分钟）取一次存进 D1 的 board_cache，页面只读这一行（同一 Worker 实例 30 秒内复用），
  *   Free 每次请求 10 ms CPU 足够。
- * - **数据源**：OKX 优先，取不到换币安 data-api.binance.vision（api.binance.com 在部分地区返回 451）；都取不到时保留上一次的数据和它的更新时间，
+ * - **数据源**：OKX 优先，取不到换币安 data-api.binance.vision（api.binance.com 在部分地区返回 451），再换 KuCoin、Gate、Kraken（Cloudflare 出口实测 OKX 429、币安 403，见 SOURCES）；都取不到时保留上一次的数据和它的更新时间，
  *   从来没取到过时页面写"暂时取不到"。每个源最近一次的结果记在 source_status，健康检查里看得到。
  * - 外部调用（C81）：每个源一次请求，超时 8 秒（AbortSignal.timeout，连接和读取都算在内），不在本次定时任务里重试（5 分钟后下一次就是重试）；
  *   返回超过 256 KB 当失败。不在数据库事务里调用外部接口。
@@ -88,7 +88,62 @@ export const BINANCE: Source = {
   },
 };
 
-export const SOURCES: Source[] = [OKX, BINANCE];
+/** KuCoin：GET /api/v1/market/candles，data 新的在前，每根 [开盘时间（秒）, 开, 收, 高, 低, 量, 成交额] */
+export const KUCOIN: Source = {
+  name: 'KuCoin',
+  url: 'https://api.kucoin.com/api/v1/market/candles?type=1hour&symbol=BTC-USDT',
+  parse(body) {
+    const b = body as { code?: unknown; data?: unknown };
+    if (!b || b.code !== '200000' || !Array.isArray(b.data) || b.data.length === 0) throw new Error('KuCoin: not candles');
+    return (b.data as unknown[])
+      .slice(0, 25)
+      .map((k) => {
+        if (!Array.isArray(k) || k.length < 5) throw new Error('bad candle');
+        const openTime = Number(k[0]) * 1000;
+        if (!Number.isFinite(openTime)) throw new Error('bad candle time');
+        return { openTime, open: dec(k[1]), close: dec(k[2]), closeTime: openTime + HOUR_MS - 1 };
+      })
+      .sort((a, b2) => a.openTime - b2.openTime);
+  },
+};
+
+/** Gate：GET /api/v4/spot/candlesticks，旧的在前，每根 [开盘时间（秒）, 成交额, 收, 高, 低, 开, 量, 是否已收盘] */
+export const GATE: Source = {
+  name: 'Gate',
+  url: 'https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=BTC_USDT&interval=1h&limit=25',
+  parse(body) {
+    if (!Array.isArray(body) || body.length === 0) throw new Error('Gate: not candles');
+    return (body as unknown[]).map((k) => {
+      if (!Array.isArray(k) || k.length < 6) throw new Error('bad candle');
+      const openTime = Number(k[0]) * 1000;
+      if (!Number.isFinite(openTime)) throw new Error('bad candle time');
+      return { openTime, open: dec(k[5]), close: dec(k[2]), closeTime: openTime + HOUR_MS - 1 };
+    });
+  },
+};
+
+/** Kraken：GET /0/public/OHLC，result.XBTUSDT 旧的在前，每根 [开盘时间（秒）, 开, 高, 低, 收, …]；一次返回约 720 根，只取最后 25 根 */
+export const KRAKEN: Source = {
+  name: 'Kraken',
+  url: 'https://api.kraken.com/0/public/OHLC?pair=XBTUSDT&interval=60',
+  parse(body) {
+    const b = body as { error?: unknown; result?: { XBTUSDT?: unknown } };
+    const rows = b?.result?.XBTUSDT;
+    if (!b || (Array.isArray(b.error) && b.error.length > 0) || !Array.isArray(rows) || rows.length === 0) throw new Error('Kraken: not candles');
+    return (rows as unknown[]).slice(-25).map((k) => {
+      if (!Array.isArray(k) || k.length < 5) throw new Error('bad candle');
+      const openTime = Number(k[0]) * 1000;
+      if (!Number.isFinite(openTime)) throw new Error('bad candle time');
+      return { openTime, open: dec(k[1]), close: dec(k[4]), closeTime: openTime + HOUR_MS - 1 };
+    });
+  },
+};
+
+/**
+ * 按顺序试：OKX → 币安 → KuCoin → Gate → Kraken。
+ * 2026-10-29 测试版实测：Cloudflare 出口访问 OKX 返回 429、币安 data-api 返回 403（同样的地址在别处正常），所以加了后面三个备用源（C114）。
+ */
+export const SOURCES: Source[] = [OKX, BINANCE, KUCOIN, GATE, KRAKEN];
 
 /** 十进制字符串保留 2 位小数，四舍五入（不经过浮点数） */
 export function round2(s: string): string {

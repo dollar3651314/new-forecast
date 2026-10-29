@@ -1,6 +1,6 @@
 /** BTC 看板：口径、OKX → 币安换源、超时（C81）、都失败保留旧数据、页面只读缓存。时间固定（C106）。 */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BINANCE, compute, HOUR_MS, OKX, pct, refresh, resetMemo, round2, type Candle } from '../../worker/src/board';
+import { BINANCE, compute, GATE, HOUR_MS, KRAKEN, KUCOIN, OKX, pct, refresh, resetMemo, round2, type Candle } from '../../worker/src/board';
 import { call, newDb, req, stubFetch, T0, testEnv } from './helpers';
 
 let db: D1Database;
@@ -19,6 +19,20 @@ const opens = Array.from({ length: 25 }, (_, i) => T0 - (24 - i) * HOUR_MS);
 const closeOf = (i: number) => (i < 15 || i === 24 ? '101.5' : '99.25');
 const okxBody = { code: '0', data: opens.map((o, i) => [String(o), '100', '102', '98', closeOf(i), '1', '1', '1', i === 24 ? '0' : '1']).reverse() };
 const binanceBody = opens.map((o, i) => [o, '100', '102', '98', closeOf(i), '1', o + HOUR_MS - 1]);
+const sec = (o: number) => String(o / 1000);
+const kucoinBody = { code: '200000', data: opens.map((o, i) => [sec(o), '100', closeOf(i), '102', '98', '1', '1']).reverse() };
+const gateBody = opens.map((o, i) => [sec(o), '1', closeOf(i), '102', '98', '100', '1', i === 24 ? 'false' : 'true']);
+/** Kraken 一次给很多根：前面多放 30 根旧的（全跌），只应该用最后 25 根 */
+const krakenBody = {
+  error: [],
+  result: {
+    XBTUSDT: [
+      ...Array.from({ length: 30 }, (_, j) => [(T0 - (55 - j) * HOUR_MS) / 1000, '100', '102', '98', '90', '99', '1', 1]),
+      ...opens.map((o, i) => [o / 1000, '100', '102', '98', closeOf(i), '99', '1', 1]),
+    ],
+    last: T0 / 1000,
+  },
+};
 
 describe('口径', () => {
   it('只算已经收盘的最后 24 根；收盘 ≥ 开盘算涨；比例 1 位小数；现价是最新一根的收盘价', () => {
@@ -28,6 +42,14 @@ describe('口径', () => {
     // 收盘时间正好等于现在的那一根算还没收盘（closeTime < now 才算，C106）
     expect(compute(candles, T0 - 1, 'OKX').hours).toBe(23);
     expect(compute(BINANCE.parse(binanceBody), T0, 'Binance')).toMatchObject({ up: 15, down: 9, price: '101.50' });
+  });
+
+  it('KuCoin、Gate、Kraken 的格式解析成同样的口径（时间是秒、字段顺序不同）', () => {
+    for (const [src, body] of [[KUCOIN, kucoinBody], [GATE, gateBody], [KRAKEN, krakenBody]] as const) {
+      expect(compute(src.parse(body), T0, src.name), src.name).toMatchObject({ hours: 24, up: 15, down: 9, price: '101.50' });
+    }
+    expect(() => KUCOIN.parse({ code: '400100', data: [] })).toThrow();
+    expect(() => KRAKEN.parse({ error: ['EGeneral:Too many requests'], result: {} })).toThrow();
   });
 
   it('四舍五入不经过浮点数', () => {
@@ -74,7 +96,29 @@ describe('定时任务换源', () => {
     expect(st!.error).toBe('timeout 50ms');
   });
 
-  it('两个都失败：保留上一次的数据和它的更新时间；从来没取到过时页面写"暂时取不到"', async () => {
+  it('OKX 429、币安 403（Cloudflare 出口实测）：依次换 KuCoin；KuCoin 也失败再换 Gate、Kraken', async () => {
+    const env = testEnv(db);
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        'https://www.okx.com/': () => new Response('', { status: 429 }),
+        'https://data-api.binance.vision/': () => new Response('', { status: 403 }),
+        'https://api.kucoin.com/': () => Response.json(kucoinBody),
+      }).fn,
+    );
+    expect(await refresh(env, T0)).toBe('KuCoin');
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        'https://www.okx.com/': () => new Response('', { status: 429 }),
+        'https://data-api.binance.vision/': () => new Response('', { status: 403 }),
+        'https://api.kraken.com/': () => Response.json(krakenBody),
+      }).fn,
+    );
+    expect(await refresh(env, T0 + 5 * 60_000)).toBe('Kraken');
+  });
+
+  it('全部失败：保留上一次的数据和它的更新时间；从来没取到过时页面写"暂时取不到"', async () => {
     const env = testEnv(db);
     vi.stubGlobal('fetch', stubFetch().fn);
     expect(await refresh(env, T0)).toBeNull();
