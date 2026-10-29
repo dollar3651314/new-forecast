@@ -1,7 +1,7 @@
 /** 名单页的 Excel：导出的表头和内容（用库读回检查）、焦点战模板、导入的整理和逐行报错（含 Excel 自动变成日期数字的时间）。 */
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
-import { TEMPLATE_HEADERS } from '../../shared/rules';
+import { MATCH_LIMITS, TEMPLATE_HEADERS } from '../../shared/rules';
 import { EXPORT_HEADERS, exportFileName, exportRows, parseMatchRows, previewImport, type ExportItem } from '../../web/src/admin/xlsx';
 
 const NOW = Date.UTC(2026, 9, 29, 4, 0, 0);
@@ -74,18 +74,22 @@ describe('焦点战导入', () => {
     expect(parseMatchRows([['聯賽', '主隊']], NOW)).toEqual({ ok: false, reason: 'header', missing: ['客隊', '開賽時間（台灣）'] });
   });
 
-  it('预览：超过 5 场时只留开赛时间最近的 5 场，标出不导入的行和会被替换掉的现有场次；勾"先清空"时不算现有的', () => {
-    const rows = ['2026-11-01 08:00', '2026-11-02 08:00', '2026-11-03 08:00', '2026-11-04 08:00', '2026-11-09 08:00'].map((t, i) => [`L${i}`, `主${i}`, `客${i}`, t]);
+  it('预览：超过上限（10 场）时只留开赛时间最近的 10 场，标出不导入的行和会被替换掉的现有场次；勾"先清空"时不算现有的', () => {
+    const n = MATCH_LIMITS.max;
+    // n 行：前 n-1 行是 11/01 起每天一场，最后一行 11/29 最晚
+    const times = [...Array.from({ length: n - 1 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')} 08:00`), '2026-11-29 08:00'];
+    const rows = times.map((t, i) => [`L${i}`, `主${i}`, `客${i}`, t]);
     const p = parseMatchRows([TEMPLATE_HEADERS.slice(0, 4), ...rows], NOW);
     if (!p.ok) throw new Error('parse');
     const existing = [{ id: 7, title: '現有 vs 一場', startsAt: '2026-11-05T02:00:00.000Z' }];
     const pv = previewImport(p.rows, existing, false, NOW);
-    expect([...pv.keepLines]).toEqual([2, 3, 4, 5]);
-    expect([...pv.dropLines]).toEqual([6]);
+    // 加上现有 1 场共 n+1 场 → 最晚的 11/29（第 n+1 行，第 1 行是表头）不导入
+    expect([...pv.keepLines]).toEqual(Array.from({ length: n - 1 }, (_, i) => i + 2));
+    expect([...pv.dropLines]).toEqual([n + 1]);
     expect(pv.removed).toEqual([]);
-    expect(pv.newCount).toBe(4);
+    expect(pv.newCount).toBe(n - 1);
     const pv2 = previewImport(p.rows, existing, true, NOW);
-    expect(pv2.newCount).toBe(5);
+    expect(pv2.newCount).toBe(n);
     expect(pv2.dropLines.size).toBe(0);
   });
 });
