@@ -17,10 +17,10 @@ import { iso, log, sha256 } from './util';
 export const PASSWORD_MIN = 16;
 /**
  * 名单页的地址（v1.1，Amos："后台域名最好不要用 /admin 这样的格式，很容易被人猜出来"）：密钥 ADMIN_PATH，Amos 在控制台填，
- * 例如 /qc-ops-xxxxxxxx。以 / 开头、一共至少 12 个字符、后面只有字母、数字和 -。仓库是公开的，所以地址不写在代码和构建产物里。
+ * 例如 /qc-ops。以 / 开头、后面至少 6 个字符（Amos 2026-10-29："大于等于6个字符就可以"）、只有字母、数字和 -。仓库是公开的，所以地址不写在代码和构建产物里。
  * 页面在 ADMIN_PATH，接口在 ADMIN_PATH/api/…；没填或不合规时名单页整体 404（和 ADMIN_PASSWORD 没填一样，默认关着）。
  */
-export const ADMIN_PATH_RE = /^\/[A-Za-z0-9-]{11,}$/;
+export const ADMIN_PATH_RE = /^\/[A-Za-z0-9-]{6,}$/;
 
 export function adminPath(env: Env): string | null {
   const p = env.ADMIN_PATH?.trim();
