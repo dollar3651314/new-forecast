@@ -54,9 +54,10 @@ async function api(path, body) {
   return r.json();
 }
 
-// ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 10 条），Gemini 忙时停 30 秒再继续 ----
+// ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 5 条；10 条一批 Gemini 会超时），Gemini 忙时停 30 秒再继续 ----
 // （2026-10-29 Amos 测试版：滚动几条就报错——每 3 秒一次超过了 Gemini 免费档每分钟的上限）
 const SCORE_EVERY_MS = 10_000;
+let scoring = false; // 上一批还没回来就不送下一批（Gemini 最长要等 45 秒）
 const pending = []; // { tabId, platform, post }
 let pauseUntil = 0;
 chrome.runtime.onMessage.addListener((msg, sender) => {
@@ -78,9 +79,10 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   return false;
 });
 setInterval(async () => {
-  if (!pending.length || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  if (scoring || !pending.length || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  scoring = true;
   const first = pending[0];
-  const batch = pending.filter((p) => p.tabId === first.tabId && p.platform === first.platform).slice(0, 10);
+  const batch = pending.filter((p) => p.tabId === first.tabId && p.platform === first.platform).slice(0, 5);
   for (const b of batch) pending.splice(pending.indexOf(b), 1);
   try {
     addLog(`送 ${batch.length} 条去打分…`);
@@ -99,6 +101,8 @@ setInterval(async () => {
     addLog('打分失败：' + e.message, e.busy ? 'warn' : 'error');
     say(e.message);
     $('msg').dataset.kind = 'score';
+  } finally {
+    scoring = false;
   }
 }, SCORE_EVERY_MS);
 
