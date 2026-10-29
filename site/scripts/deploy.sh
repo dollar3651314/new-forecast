@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 部署到 Cloudflare（Cloudflare 规范 K3）：CI 的 deploy job 在 ci-ok 通过后运行；可以重复运行。
-#   bash site/scripts/deploy.sh staging      推到 staging 分支时：测试版 new-forecast-site-staging（workers.dev，整站密码门）
+#   bash site/scripts/deploy.sh staging      推到 staging 分支时：测试版 new-forecast-site-staging（workers.dev + fc-test-www.quickcome.online）
 #   bash site/scripts/deploy.sh production   推到 main 分支时：正式版 new-forecast-site（workers.dev 备用地址 + Amos 以后绑的 www.quickcome.online）
 # 步骤（每步一行 ✓ / ✗ / ·）：D1 没有就建（ensure-d1.mjs）→ 执行没执行过的 D1 迁移 → 部署（带提交号）→ 从输出里取 workers.dev 地址作为 M-12 备用网址
 #   （第一次部署时还不知道地址，取到以后带上 BACKUP_URL 再部署一次）→ 打印健康检查的摘要（不含密钥，C98、C102）。
