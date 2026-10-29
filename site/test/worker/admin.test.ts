@@ -59,6 +59,16 @@ describe('默认关着：ADMIN_PATH、ADMIN_PASSWORD 任一没配好', () => {
     });
   }
 
+  for (const v of ['qc-ops', '/qc-ops/', ' qc-ops/ ']) {
+    it(`地址写成 "${v}"（忘了开头的 / 或多写了结尾的 /）也能用，地址按 /qc-ops 算`, async () => {
+      const env = testEnv(db, { ADMIN_PATH: v });
+      const h = await (await call(env, req('GET', '/api/health'))).json();
+      expect(h).toMatchObject({ checks: { admin: 'ok' } });
+      const r = await call(env, req('GET', '/qc-ops/api/session'));
+      expect(await r.text()).not.toBe('asset:/qc-ops/api/session');
+    });
+  }
+
   it('地址 / 后面正好 6 个字符就能用（Amos 2026-10-29：大于等于 6 个字符）', async () => {
     const env = testEnv(db, { ADMIN_PATH: '/qc-ops' });
     const h = await (await call(env, req('GET', '/api/health'))).json();
