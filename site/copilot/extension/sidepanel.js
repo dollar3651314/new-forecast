@@ -8,7 +8,8 @@ let cfg = { relay: '', token: '', product: 'forecast' };
 let cur = null; // { platform, post, score, reasons, tabId, drafts, pick }
 const reasons = new Map(); // id -> reasons
 
-function say(text, ok = false) { $('msg').textContent = text; $('msg').classList.toggle('ok', ok); }
+function say(text, ok = false) { $('msg').textContent = text; $('msg').classList.toggle('ok', ok); $('msg').dataset.kind = ''; }
+function setNote(text, kind) { const n = $('set-msg'); n.textContent = text; n.className = 'msg' + (kind === 'ok' ? ' ok' : kind === 'busy' ? ' busy' : ''); }
 function setStatus(on, text) { $('status').textContent = text; $('status').classList.toggle('on', on); }
 
 async function api(path, body) {
@@ -21,21 +22,21 @@ async function api(path, body) {
   if (r.status === 401) throw new Error('连接令牌不对，请到"设置"重新填');
   if (r.status === 404) throw new Error('中转服务还没开通（地址不对，或者 Cloudflare 里还没填令牌和 Gemini Key）');
   if (r.status === 429) { const j = await r.json().catch(() => ({})); throw new Error(j.error === 'daily cap' ? `今天已经回了 ${j.cap} 条，到上限了` : '太频繁了，等一分钟再试'); }
-  if (r.status === 502) throw new Error('团队暂时没回应（Gemini 没有回答），稍后再试');
+  if (r.status === 503) { const e = new Error('团队这一分钟忙不过来（Gemini 免费额度每分钟有上限），30 秒后自动继续'); e.busy = true; throw e; }
+  if (r.status === 502) { const j = await r.json().catch(() => ({})); throw new Error('团队暂时没回应（Gemini 没有回答' + (j.detail ? '：' + j.detail : '') + '），稍后再试'); }
   if (!r.ok) throw new Error('中转服务出错了（' + r.status + '）');
   return r.json();
 }
 
-// ---- 打分：内容脚本送来的帖子 ----
+// ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 10 条），Gemini 忙时停 30 秒再继续 ----
+// （2026-10-29 Amos 测试版：滚动几条就报错——每 3 秒一次超过了 Gemini 免费档每分钟的上限）
+const SCORE_EVERY_MS = 10_000;
+const pending = []; // { tabId, platform, post }
+let pauseUntil = 0;
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.type === 'qc-posts' && sender.tab) {
-    api('/v1/score', { product: cfg.product, platform: msg.platform, posts: msg.posts })
-      .then((r) => {
-        setStatus(true, '营销团队在线');
-        for (const it of r.items) reasons.set(it.id, it.reasons);
-        chrome.tabs.sendMessage(sender.tab.id, { type: 'qc-scores', platform: msg.platform, items: r.items }).catch(() => {});
-      })
-      .catch((e) => { setStatus(false, '未连接'); say(e.message); });
+    for (const post of msg.posts) if (!pending.some((p) => p.post.id === post.id)) pending.push({ tabId: sender.tab.id, platform: msg.platform, post });
+    pending.splice(0, Math.max(0, pending.length - 40)); // 只留最近看到的 40 条
     return false;
   }
   if (msg && msg.type === 'qc-select' && sender.tab) {
@@ -43,6 +44,26 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
   return false;
 });
+setInterval(async () => {
+  if (!pending.length || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  const first = pending[0];
+  const batch = pending.filter((p) => p.tabId === first.tabId && p.platform === first.platform).slice(0, 10);
+  for (const b of batch) pending.splice(pending.indexOf(b), 1);
+  try {
+    const r = await api('/v1/score', { product: cfg.product, platform: first.platform, posts: batch.map((b) => b.post) });
+    setStatus(true, '营销团队在线');
+    if ($('msg').dataset.kind === 'score') say('');
+    for (const it of r.items) reasons.set(it.id, it.reasons);
+    chrome.tabs.sendMessage(first.tabId, { type: 'qc-scores', platform: first.platform, items: r.items }).catch(() => {});
+  } catch (e) {
+    pending.unshift(...batch); // 没打成分的放回去，下次再送
+    if (e.busy) pauseUntil = Date.now() + 30_000;
+    else pauseUntil = Date.now() + 60_000;
+    setStatus(!!e.busy, e.busy ? '营销团队忙，稍等' : '未连接');
+    say(e.message);
+    $('msg').dataset.kind = 'score';
+  }
+}, SCORE_EVERY_MS);
 
 // ---- 这条 ----
 async function select(c) {
@@ -145,9 +166,25 @@ async function loadToday() {
 
 // ---- 设置 ----
 $('save').addEventListener('click', async () => {
+  // 按下后马上有反馈：按钮变成"正在连接…"并且不能再按；结果写在按钮下面（2026-10-29 Amos：点了没有任何反应）
+  const btn = $('save');
+  btn.disabled = true;
+  btn.textContent = '正在连接…';
+  setNote('正在连接中转服务…', 'busy');
   cfg = { relay: $('relay').value.trim(), token: $('token').value.trim(), product: $('product').value };
   await chrome.storage.local.set({ qc: cfg });
-  try { await api('/v1/today'); setStatus(true, '营销团队在线'); say('连接成功。', true); } catch (e) { setStatus(false, '未连接'); say(e.message); }
+  try {
+    await api('/v1/today');
+    setStatus(true, '营销团队在线');
+    btn.textContent = '✓ 已连接';
+    setNote('连接成功，设置已保存。去 X 或 Threads 首页往下滑就能用了。', 'ok');
+    setTimeout(() => { btn.textContent = '保存并测试连接'; btn.disabled = false; }, 2000);
+  } catch (e) {
+    setStatus(false, '未连接');
+    btn.textContent = '保存并测试连接';
+    btn.disabled = false;
+    setNote('连接失败：' + e.message, 'err');
+  }
 });
 
 function switchTab(k) {
@@ -162,6 +199,6 @@ chrome.storage.local.get('qc').then(({ qc }) => {
   $('relay').value = cfg.relay;
   $('token').value = cfg.token;
   $('product').value = cfg.product;
-  if (!cfg.relay || !cfg.token) { switchTab('set'); say('第一次使用：填中转服务地址和连接令牌。'); return; }
+  if (!cfg.relay || !cfg.token) { switchTab('set'); setNote('第一次使用：填中转服务地址和连接令牌，再点"保存并测试连接"。', 'busy'); return; }
   api('/v1/today').then(() => setStatus(true, '营销团队在线')).catch((e) => say(e.message));
 });

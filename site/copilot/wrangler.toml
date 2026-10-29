@@ -16,7 +16,7 @@ migrations_dir = "migrations"
 
 [vars]
 ENVIRONMENT = "production"
-GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL = "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest"
 DAILY_REPLY_CAP = "10"
 
 [env.staging]
@@ -32,5 +32,5 @@ migrations_dir = "migrations"
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
-GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL = "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest"
 DAILY_REPLY_CAP = "10"

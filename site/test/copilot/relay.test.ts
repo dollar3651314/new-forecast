@@ -101,8 +101,30 @@ describe('打分', () => {
     expect((await handle(req('POST', '/v1/score', { product: 'nope', platform: 'x', posts: [POST] }), env(), T0)).status).toBe(400);
     expect((await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'ig', posts: [POST] }), env(), T0)).status).toBe(400);
     expect((await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [{ id: 'a b', text: 'x' }] }), env(), T0)).status).toBe(400);
+    const bad = fakeGemini(new Response('oops', { status: 500 }));
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, bad.fetcher);
+    expect(r.status).toBe(502);
+    // 原因给插件显示，不含 Key
+    const j = (await r.json()) as { detail: string };
+    expect(j.detail).toBe('gemini-3.8-flash: HTTP 500');
+    expect(JSON.stringify(j)).not.toContain('ci_only_gemini_key');
+  });
+  it('Gemini 超额（429）返回 503 + 30 秒后再试（2026-10-29 测试版：滚动几条就报错）', async () => {
     const g = fakeGemini(new Response('quota', { status: 429 }));
-    expect((await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher)).status).toBe(502);
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
+    expect(r.status).toBe(503);
+    expect(await r.json()).toEqual({ error: 'team busy', retryAfter: 30 });
+  });
+  it('模型名不存在（404）就换下一个；全都 404 才算出错；回答被 ```json 包住也能读', async () => {
+    const ok = { candidates: [{ content: { parts: [{ text: '```json\n{"items":[{"id":"' + POST.id + '","score":70,"reasons":["NBA"]}]}\n```' }] } }] };
+    const g = fakeGemini(new Response('no', { status: 404 }), new Response(JSON.stringify(ok), { status: 200 }));
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
+    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 70, reasons: ['NBA'] }] });
+    expect(g.calls.map((c) => c.url.split('/models/')[1].split(':')[0])).toEqual(['gemini-3.8-flash', 'gemini-3.6-flash']);
+    const all404 = fakeGemini(...[1, 2, 3].map(() => new Response('no', { status: 404 })));
+    const r2 = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, all404.fetcher);
+    expect(r2.status).toBe(502);
+    expect(((await r2.json()) as { detail: string }).detail).toContain('gemini-flash-latest: HTTP 404');
   });
 });
 
