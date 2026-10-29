@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /confirm
+Disallow: /unsubscribe
+Disallow: /invite
+Sitemap: https://www.quickcome.online/sitemap.xml

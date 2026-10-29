@@ -1,0 +1,38 @@
+/* 名单页：沿用公开页面的配色，表格和数字卡来自原型的名单页画面 */
+.admin { padding-block: 24px 48px; }
+.admin section.blk { padding-block: 24px; }
+.btnpill { background: transparent; }
+.login { max-width: 420px; margin: 24px auto; }
+.login input, .exform input, .mform input, .filters select { width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--line); font: inherit; background: #fff; color: var(--ink); }
+.login input { margin: 6px 0 12px; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.kpi .k { font-size: 12.5px; color: var(--muted); }
+.kpi .v { font-family: var(--mono); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .goal { font-size: 12px; color: var(--muted); }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: #eef1f5; font-size: 13px; white-space: nowrap; }
+td.n, th.n { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+tr.dim td, .card.dim { color: var(--muted); }
+td.acts, .acts { white-space: nowrap; display: flex; gap: 12px; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; margin-bottom: 12px; }
+.filters select { width: auto; }
+.cards { display: grid; gap: 8px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.mform { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr 1.4fr; gap: 10px; align-items: start; }
+.mform .mf { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.mform .mf.bad input { border-color: var(--err); }
+.mform .mf em { color: var(--err); font-style: normal; font-size: 12.5px; }
+.mform .mbtns { grid-column: 1 / -1; display: flex; gap: 10px; }
+.mform .mbtns .btn { width: auto; padding: 9px 18px; }
+.mform .form-err { grid-column: 1 / -1; margin: 0; }
+.exform { display: flex; gap: 10px; align-items: center; max-width: 520px; flex-wrap: wrap; }
+.exform label { width: 100%; font-size: 13px; color: var(--muted); }
+.exform input { flex: 1; min-width: 180px; }
+.exform .btn { width: auto; padding: 10px 18px; }
+@media (max-width: 760px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .mform { grid-template-columns: 1fr; }
+}

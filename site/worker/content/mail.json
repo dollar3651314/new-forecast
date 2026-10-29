@@ -1,0 +1,22 @@
+{
+  "_说明": "确认邮件的文字（三种语言，C6：文案不写死在代码里）。变量：{confirm} 确认链接、{invite} 私密的邀请查看页、{unsubscribe} 退订链接。不是正式版时标题前面加 envPrefix（C34）。M-4 只讲用 BEP20 充值，不点名任何交易所（需求单 v1.2 关卡结论）。site/test/worker/mail.test.ts 检查三种语言的变量齐全。",
+  "envPrefix": {
+    "zh-TW": "[測試環境] ",
+    "zh-CN": "[测试环境] ",
+    "en": "[TEST] "
+  },
+  "confirm": {
+    "zh-TW": {
+      "subject": "請確認訂閱 Quick Come 上線通知",
+      "body": "你在 Quick Come 留下了這個電子信箱。請打開下面的連結，在頁面上點「確認訂閱」（7 天內有效）：\n{confirm}\n\n確認以後，我們只會在正式上線時寄一封通知給你，不寄其他郵件。\n\n充值小提醒：上線後用 BEP20 充值 USDT，手續費最低；小額不要用 TRC20，手續費可能吃掉將近一成。\n\n邀請朋友一起等：確認以後，打開你的專屬頁面拿邀請連結，也能看到你邀請了幾個人（這個頁面只給你看，不要轉給別人）：\n{invite}\n\n如果不是你本人提交的，忽略這封郵件即可，不會訂閱。\n不想再收到：{unsubscribe}"
+    },
+    "zh-CN": {
+      "subject": "请确认订阅 Quick Come 上线通知",
+      "body": "你在 Quick Come 留下了这个邮箱。请打开下面的链接，在页面上点\"确认订阅\"（7 天内有效）：\n{confirm}\n\n确认以后，我们只会在正式上线时给你发一封通知，不发其他邮件。\n\n充值小提醒：上线后用 BEP20 充值 USDT，手续费最低；小额不要用 TRC20，手续费可能吃掉将近一成。\n\n邀请朋友一起等：确认以后，打开你的专属页面拿邀请链接，也能看到你邀请了几个人（这个页面只给你看，不要转给别人）：\n{invite}\n\n如果不是你本人提交的，忽略这封邮件即可，不会订阅。\n不想再收到：{unsubscribe}"
+    },
+    "en": {
+      "subject": "Confirm your Quick Come launch notice",
+      "body": "This email address was left on Quick Come. Open the link below and click \"Confirm\" on the page (valid for 7 days):\n{confirm}\n\nOnce confirmed, we will send you a single email when we launch, and nothing else.\n\nDeposit tip: after launch, deposit USDT over BEP20 for the lowest fee; avoid TRC20 for small amounts, where the fee can eat up nearly 10%.\n\nInvite friends: after confirming, open your private page to get your invite link and see how many people you have invited (this page is for you only; do not share it):\n{invite}\n\nIf this was not you, just ignore this email and you will not be subscribed.\nUnsubscribe: {unsubscribe}"
+    }
+  }
+}

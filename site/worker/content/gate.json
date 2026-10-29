@@ -1,0 +1,13 @@
+{
+  "_说明": "测试版整站密码门的文字（SITE_GATE = on 时，site/worker/src/gate.ts）。只在测试版出现，给 Amos 和测试的人看，繁中和英文写在同一页。",
+  "title": "Quick Come 測試環境 · Test environment",
+  "banner": "測試環境 · TEST — 不是正式網站，請不要留真實資料",
+  "heading": "請輸入測試環境的密碼",
+  "headingEn": "Enter the password for the test environment",
+  "label": "密碼 Password",
+  "submit": "進入 Enter",
+  "wrong": "密碼不對，請再試一次。Wrong password.",
+  "locked": "錯太多次了，請 {minutes} 分鐘後再試。Too many attempts, try again in {minutes} min.",
+  "failed": "暫時無法驗證，請重試。Could not verify, please retry.",
+  "unavailable": "測試環境還沒有設定密碼（ADMIN_PASSWORD 至少 16 個字元），暫時不開放。The test environment has no password set yet."
+}

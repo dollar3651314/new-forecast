@@ -1,0 +1,160 @@
+# 每个 PR 的自动检查（agents 规则 C54），按"精简 CI"写（C74，模板 agents/模板/ci.yml）。
+#   - 按改动路径决定跑哪些检查：只改文档只跑基本检查（索引检查、密钥扫描）；改了 site/ 才跑官网的检查和端到端。
+#   - 没跑的 job 显示"跳过"，由汇总 job ci-ok 统一给出结果。不要在 on: 里加 paths: 过滤（没触发的检查会一直"等待中"）。
+#   - 推送到 staging、main 和手动运行时跑完整检查（不按路径跳过），通过后部署：staging → 测试版，main → 正式版。
+#   - 同一分支连续推送时取消旧的运行；缓存依赖和浏览器；每个 job 都有 timeout-minutes；不开定时任务。
+# 分支保护只把汇总 job "ci-ok" 设为"必须通过"，并勾选 Do not allow bypassing the above settings（仓库是公开的，可以开）。
+# CI 不需要任何密钥：Resend、OKX、币安都用替身，D1 用 Miniflare 的本地 SQLite。只有 deploy job 用 CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID，没填时打印"跳过"。
+name: ci
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ci == 'true' }}
+      site: ${{ steps.filter.outputs.site }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ci:
+              - '.github/workflows/**'
+            site:
+              - 'site/**'
+
+  # 基本检查：每次都跑
+  basic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: 项目地图和索引检查（C53）
+        run: node scripts/check-project-index.mjs
+      - name: 密钥扫描（仓库里不能出现密钥的值）
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 官网快检查：类型检查、单元和接口测试、构建、产物检查、wrangler 配置能打包
+  site:
+    needs: changes
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: site
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: 类型检查
+        run: npm run typecheck
+      - name: 测试（Worker 接口、看板换源和超时、页面组件、三语文案、共用规则、脚本）
+        run: npm test
+      - name: 构建
+        run: npm run build
+      - name: 产物检查（没有交易类路径和接口，公开页面没有名单页接口）
+        run: npm run check-dist
+      - name: wrangler 配置能打包（不连 Cloudflare）
+        run: npm run dry-run
+      - name: 依赖安全检查（运行时依赖没有高危漏洞）
+        run: npm audit --omit=dev --audit-level=high
+
+  # 重检查：本机端到端（wrangler dev + Playwright）。改了 site/ 才在 PR 上跑；推送到 staging、main 一定跑
+  site-e2e:
+    needs: changes
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: site
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: 浏览器缓存
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: 端到端（留邮箱 → 确认 → 邀请 → 名单页 → 焦点战 → 导出 → 退订；测试版密码门）
+        run: node scripts/e2e-local.mjs --no-screenshots
+
+  # 汇总：分支保护只把这一项设为"必须通过"。跳过的 job 算通过；任何一项失败或被取消，这里就失败
+  ci-ok:
+    needs: [changes, basic, site, site-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: 汇总结果
+        run: |
+          echo '${{ toJSON(needs) }}'
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "有检查失败或被取消"; exit 1
+          fi
+
+  # 部署（Cloudflare 规范 K3）：只在推送到 staging（测试版）、main（正式版），并且 ci-ok 通过时。
+  # 没填 GitHub Secrets CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID 时 deploy.sh 打印"跳过"并成功（没配置不是故障，C103）。
+  deploy:
+    needs: [ci-ok, site]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main') && needs.ci-ok.result == 'success' && needs.site.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: site
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SITE_BACKUP_URL: ${{ vars.SITE_BACKUP_URL }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm run check-dist
+      - name: 部署（staging → 测试版 new-forecast-site-staging；main → 正式版 new-forecast-site）
+        env:
+          TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        run: bash scripts/deploy.sh "$TARGET"

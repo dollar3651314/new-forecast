@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- M-11 分享卡片：返獎率對照。改了這張圖要重新執行 node scripts/render-og.mjs 產生 og-return-rate.png（社群平台不認 SVG） -->
+  <rect width="1200" height="630" fill="#0F1B33"/>
+  <g transform="translate(80 70)">
+    <rect x="0" y="6" width="16" height="44" rx="4" fill="#2DD4BF"/>
+    <rect x="20" y="22" width="16" height="28" rx="4" fill="#FBBF24"/>
+    <text x="52" y="44" font-family="Noto Sans TC, Noto Sans SC, PingFang TC, sans-serif" font-size="34" font-weight="700" fill="#FFFFFF">Quick Come</text>
+  </g>
+  <text x="80" y="200" font-family="Noto Sans TC, Noto Sans SC, PingFang TC, sans-serif" font-size="30" font-weight="700" fill="#2DD4BF" letter-spacing="3">真錢機率 · 不當莊</text>
+  <text x="80" y="268" font-family="Noto Sans TC, Noto Sans SC, PingFang TC, sans-serif" font-size="58" font-weight="900" fill="#FFFFFF">押注的錢，大部分回到玩家手上</text>
+  <g font-family="Noto Sans TC, Noto Sans SC, PingFang TC, sans-serif">
+    <text x="80" y="372" font-size="30" fill="#C9D2E3">台灣運彩</text>
+    <rect x="300" y="346" width="660" height="36" rx="7" fill="#FFFFFF" fill-opacity="0.07"/>
+    <rect x="300" y="346" width="514.8" height="36" rx="7" fill="#7B879E"/>
+    <text x="1120" y="375" font-size="36" font-weight="700" fill="#FFFFFF" text-anchor="end" font-family="JetBrains Mono, Menlo, monospace">≤78%</text>
+    <text x="80" y="442" font-size="30" fill="#C9D2E3">Quick Come</text>
+    <rect x="300" y="416" width="660" height="36" rx="7" fill="#FFFFFF" fill-opacity="0.07"/>
+    <rect x="300" y="416" width="643.5" height="36" rx="7" fill="#2DD4BF"/>
+    <text x="1120" y="445" font-size="36" font-weight="700" fill="#FFFFFF" text-anchor="end" font-family="JetBrains Mono, Menlo, monospace">≈97.5%</text>
+    <text x="80" y="528" font-size="22" fill="#8E9AB3">返獎率＝所有押注金額裡回到玩家手上的比例。運彩為《運動彩券發行條例》第 6 條的上限；</text>
+    <text x="80" y="560" font-size="22" fill="#8E9AB3">Quick Come 以兩邊押注各半計算，平台只從贏家的盈利裡抽 5%。即將上線，先留信箱。</text>
+  </g>
+</svg>

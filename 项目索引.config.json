@@ -1,0 +1,77 @@
+{
+  "_说明": "项目地图和项目索引的检查配置（agents 规则 C53）。由 scripts/check-project-index.mjs 读取，CI 的 basic job 每次都运行。",
+  "map": "项目地图.md",
+  "index": "项目索引.md",
+  "entry": [
+    "CLAUDE.md",
+    "AGENTS.md"
+  ],
+  "external": [
+    {
+      "_说明": "内部文档（需求单、技术方案、调研、Amos 待办）在 agents 仓库的 产品/forecast/（agents 规则 C119），索引里写成 `agents/产品/forecast/…`",
+      "prefix": "agents/",
+      "repo": "dollar3651314/agents"
+    }
+  ],
+  "files": {
+    "_说明": "include：必须写进索引的文件（git 跟踪的 + 新建还没提交的）；exclude：锁文件、图片、截图",
+    "include": [
+      "*.md",
+      "项目索引.config.json",
+      "scripts/**",
+      ".github/workflows/**",
+      "site/**"
+    ],
+    "exclude": [
+      "**/package-lock.json",
+      "**/*.png",
+      "assets/**"
+    ]
+  },
+  "lists": [
+    {
+      "name": "环境变量",
+      "section": "5. 环境变量",
+      "sources": [
+        "site/worker/src/",
+        "site/scripts/",
+        ".github/workflows/"
+      ],
+      "patterns": [
+        "\\benv\\.([A-Z][A-Z0-9_]+)",
+        "\\$\\{\\{\\s*(?:vars|secrets)\\.([A-Z][A-Z0-9_]+)"
+      ],
+      "ignore": [
+        "GITHUB_TOKEN"
+      ],
+      "match": "firstColumn",
+      "twoWay": "word",
+      "token": "^[A-Z][A-Z0-9_]+$"
+    },
+    {
+      "name": "数据库表",
+      "section": "4.1",
+      "sources": [
+        "site/migrations/"
+      ],
+      "patterns": [
+        "CREATE TABLE (?:IF NOT EXISTS )?(\\w+)"
+      ],
+      "match": "firstColumn",
+      "twoWay": "extracted"
+    },
+    {
+      "name": "接口",
+      "section": "2. 接口",
+      "sources": [
+        "site/worker/src/"
+      ],
+      "patterns": [
+        "===\\s*'(/api/[a-z/]*[a-z])'",
+        "startsWith\\('(/api/[a-z/]*[a-z])'\\)"
+      ],
+      "match": "firstColumn",
+      "twoWay": "extracted"
+    }
+  ]
+}
