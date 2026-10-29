@@ -1,12 +1,12 @@
 /**
- * 这周的焦点战（M-2，需求单 v1.2：每周日挑 3～5 场，Amos 在名单页手动填或批量导入，不接体育数据接口）。
+ * 这周的焦点战（M-2，需求单 v1.2：每周 7～10 场（2026-10-29 F-1，原 3～5 场），Amos 在名单页手动填或批量导入，不接体育数据接口）。
  * - 公开：GET /api/public/matches → 还没开赛或开赛不到 3 小时的，按开赛时间排序（shared/rules.ts matchVisible）。
  *   首页只显示联赛、对战（主队 vs 客队）、开赛时间，所以公开接口不返回备注。
  * - 名单页：GET / POST /api/admin/matches，PUT / DELETE /api/admin/matches/<id>，POST /api/admin/matches/import（登录后，admin.ts 先检查会话）。
- *   校验和规范化用 shared/rules.ts 的 validateMatch（和页面同一套，C108），一次返回全部字段的错误（C56）；最多 5 场。
+ *   校验和规范化用 shared/rules.ts 的 validateMatch（和页面同一套，C108），一次返回全部字段的错误（C56）；最多 MATCH_LIMITS.max 场；首页只给开赛时间最近的 MATCH_LIMITS.shown 场。
  * - 批量导入 POST /api/admin/matches/import {items:[{league, home, away, startsAt, note}], replace}：
  *   每一行都检查完再返回（400，fields 的 field 写成 "行号.字段"，行号从 0 起）；全部正确才写入。
- *   replace = true 先清空现有场次；超过 5 场时按 pickMatches 只留开赛时间最近的 5 场（和页面预览同一个函数）。
+ *   replace = true 先清空现有场次；超过上限时按 pickMatches 只留开赛时间最近的那几场（和页面预览同一个函数）。
  *   Excel / CSV 的解析在名单页浏览器里做（Worker 免费版每次请求只有 10ms CPU），这里只收整理好的 JSON。
  */
 import { formatTaiwanTime, MATCH_LIMITS, matchTitle, matchVisible, pickMatches, validateMatch, type MatchClean } from '../../shared/rules';
@@ -46,7 +46,7 @@ async function all(env: Env): Promise<MatchRow[]> {
 }
 
 export async function publicMatches(env: Env, now: number): Promise<Response> {
-  const items = (await all(env)).filter((r) => matchVisible(r.starts_at, now)).map((r) => ({ id: r.id, league: r.league, title: matchTitle(r), startsAt: r.starts_at }));
+  const items = (await all(env)).filter((r) => matchVisible(r.starts_at, now)).slice(0, MATCH_LIMITS.shown).map((r) => ({ id: r.id, league: r.league, title: matchTitle(r), startsAt: r.starts_at }));
   return json({ items }, 200, { 'Cache-Control': 'public, max-age=60' });
 }
 
