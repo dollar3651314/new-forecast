@@ -13,7 +13,7 @@ import { esc } from './http';
 import { log, mask } from './util';
 
 export const RESEND_URL = 'https://api.resend.com/emails';
-export const DEFAULT_FROM = 'Quick Come <noreply@quickcome.online>';
+export const DEFAULT_FROM = 'Quick Come <noreply@email.quickcome.online>';
 export const MAIL_TIMEOUT_MS = 10_000;
 export const MAIL_RETRY_DELAY_MS = 1_000;
 
