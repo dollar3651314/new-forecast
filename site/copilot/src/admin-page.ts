@@ -76,6 +76,7 @@ function render(){
     left.append(who,Object.assign(document.createElement('p'),{className:'post',textContent:it.snippet}));
     const dr=Object.assign(document.createElement('div'),{className:'draft',textContent:it.draft});
     if(it.source)dr.append(Object.assign(document.createElement('div'),{className:'src',textContent:'数据来源：'+it.source}));
+    if(it.engine==='workers-ai')dr.append(Object.assign(document.createElement('div'),{className:'src',textContent:'备用 AI 写的（Gemini 当时用不了），发之前多看一眼'}));
     left.append(dr);
     const acts=document.createElement('div');acts.className='acts';
     if(filter==='pending'){

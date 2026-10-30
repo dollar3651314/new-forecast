@@ -98,9 +98,9 @@ export async function adminApi(env: Env, req: Request, now: number): Promise<Res
   if (!(await sessionOk(env, req, now))) return json({ error: '请重新登录' }, 401);
   if (p === '/api/queue' && req.method === 'GET') {
     const status = ['pending', 'done', 'skip'].includes(url.searchParams.get('status') ?? '') ? url.searchParams.get('status')! : 'pending';
-    const r = await env.DB.prepare(`SELECT id, at, platform, post_id, author, snippet, post_at, score, draft, source, status FROM queue WHERE status = ?1 ORDER BY ${status === 'pending' ? 'at DESC' : 'updated_at DESC'} LIMIT 200`).bind(status).all<{ id: number; at: number; platform: 'x' | 'threads'; post_id: string; author: string; snippet: string; post_at: number | null; score: number | null; draft: string; source: string; status: string }>();
+    const r = await env.DB.prepare(`SELECT id, at, platform, post_id, author, snippet, post_at, score, draft, source, engine, status FROM queue WHERE status = ?1 ORDER BY ${status === 'pending' ? 'at DESC' : 'updated_at DESC'} LIMIT 200`).bind(status).all<{ id: number; at: number; platform: 'x' | 'threads'; post_id: string; author: string; snippet: string; post_at: number | null; score: number | null; draft: string; source: string; engine: string; status: string }>();
     const items = (r.results ?? []).map((x) => ({
-      id: x.id, platform: x.platform, author: x.author, snippet: x.snippet, score: x.score, draft: x.draft, source: x.source, status: x.status, savedAt: x.at,
+      id: x.id, platform: x.platform, author: x.author, snippet: x.snippet, score: x.score, draft: x.draft, source: x.source, engine: x.engine, status: x.status, savedAt: x.at,
       stale: (x.post_at ?? x.at) < now - 24 * 3600_000,
       replyUrl: replyUrl(x.platform, x.post_id, x.draft), postUrl: postUrl(x.platform, x.post_id, x.author),
     }));
@@ -120,11 +120,11 @@ export async function adminApi(env: Env, req: Request, now: number): Promise<Res
 }
 
 /** 插件存一条进清单（调用方已经核对过令牌和来源）；同一条帖子只存一次 */
-export async function saveToQueue(env: Env, now: number, q: { product: string; platform: 'x' | 'threads'; postId: string; author: string; text: string; ageMinutes: number | null; score: number | null; draft: string; source: string }): Promise<{ saved: boolean }> {
+export async function saveToQueue(env: Env, now: number, q: { product: string; platform: 'x' | 'threads'; postId: string; author: string; text: string; ageMinutes: number | null; score: number | null; draft: string; source: string; engine?: string }): Promise<{ saved: boolean }> {
   const r = await env.DB.prepare(
-    'INSERT INTO queue (at, updated_at, product, platform, post_id, author, snippet, post_at, score, draft, source) VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT (platform, post_id) DO NOTHING',
+    'INSERT INTO queue (at, updated_at, product, platform, post_id, author, snippet, post_at, score, draft, source, engine) VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT (platform, post_id) DO NOTHING',
   )
-    .bind(now, q.product, q.platform, q.postId, q.author, q.text.slice(0, 280), q.ageMinutes == null ? null : now - q.ageMinutes * 60_000, q.score, q.draft.slice(0, 600), q.source.slice(0, 120))
+    .bind(now, q.product, q.platform, q.postId, q.author, q.text.slice(0, 280), q.ageMinutes == null ? null : now - q.ageMinutes * 60_000, q.score, q.draft.slice(0, 600), q.source.slice(0, 120), q.engine === 'workers-ai' ? 'workers-ai' : 'gemini')
     .run();
   await env.DB.prepare("DELETE FROM queue WHERE at < ?1 AND status != 'pending'").bind(now - KEEP_MS).run();
   return { saved: r.meta.changes === 1 };

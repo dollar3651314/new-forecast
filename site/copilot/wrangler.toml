@@ -14,9 +14,14 @@ database_name = "quickcome-copilot"
 database_id = "local-only"
 migrations_dir = "migrations"
 
+# 备用 AI（Workers AI，2026-10-30 Amos 选 A）：用账号自带的绑定，不用密钥；每天上限见 WORKERS_AI_DAILY_NEURONS（不超出免费额度）
+[ai]
+binding = "AI"
+
 [vars]
 ENVIRONMENT = "production"
-GEMINI_MODEL = "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest"
+GEMINI_MODEL = "gemini-3.6-flash,gemini-3.8-flash,gemini-flash-latest"
+WORKERS_AI_DAILY_NEURONS = "8000"
 DAILY_REPLY_CAP = "10"
 
 [env.staging]
@@ -30,7 +35,11 @@ database_name = "quickcome-copilot-staging"
 database_id = "local-only"
 migrations_dir = "migrations"
 
+[env.staging.ai]
+binding = "AI"
+
 [env.staging.vars]
 ENVIRONMENT = "staging"
-GEMINI_MODEL = "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest"
+GEMINI_MODEL = "gemini-3.6-flash,gemini-3.8-flash,gemini-flash-latest"
+WORKERS_AI_DAILY_NEURONS = "8000"
 DAILY_REPLY_CAP = "10"
