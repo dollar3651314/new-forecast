@@ -60,20 +60,20 @@ export function extractJson(text: string): unknown {
   } catch {
     const a = t.indexOf('{');
     const b = t.lastIndexOf('}');
-    if (a < 0 || b <= a) throw new WorkersAiError('workers-ai: not json');
+    if (a < 0 || b <= a) throw new WorkersAiError('Workers AI 回答不是 JSON');
     try {
       return JSON.parse(t.slice(a, b + 1));
     } catch {
-      throw new WorkersAiError('workers-ai: not json');
+      throw new WorkersAiError('Workers AI 回答不是 JSON');
     }
   }
 }
 
 export async function askWorkersAi(env: Env, system: string, user: string, now: number): Promise<unknown> {
   const ai = env.AI as AiLike | undefined;
-  if (!ai) throw new WorkersAiError('workers-ai: not bound');
+  if (!ai) throw new WorkersAiError('Workers AI 没有绑定');
   const cap = dailyCap(env);
-  if ((await usedToday(env, now)) + RESERVE > cap) throw new WorkersAiCap(`workers-ai: daily cap ${cap}`);
+  if ((await usedToday(env, now)) + RESERVE > cap) throw new WorkersAiCap(`Workers AI 今天用到 ${cap} 上限（台湾早上 8 点重置）`);
   let r: unknown;
   try {
     r = await ai.run(WAI_MODEL, {
@@ -86,7 +86,7 @@ export async function askWorkersAi(env: Env, system: string, user: string, now: 
   } catch (e) {
     // 失败的调用不一定计费，但保守起见按一次最多可能用的量记账
     await addUsage(env, now, RESERVE);
-    throw new WorkersAiError(`workers-ai: ${String((e as Error)?.message ?? e).replace(/\s+/g, ' ').slice(0, 120)}`);
+    throw new WorkersAiError(`Workers AI 出错：${String((e as Error)?.message ?? e).replace(/\s+/g, ' ').slice(0, 120)}`);
   }
   const { text, inTok, outTok } = readResult(r);
   // 没有 token 数时按字数估（中文 1 个字算 1 个 token，偏多）

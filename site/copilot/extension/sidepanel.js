@@ -48,8 +48,9 @@ async function api(path, body) {
   if (r.status === 401) throw new Error('连接令牌不对，请到"设置"重新填');
   if (r.status === 404) throw new Error('中转服务还没开通（地址不对，或者 Cloudflare 里还没填令牌和 Gemini Key）');
   if (r.status === 429) { const j = await r.json().catch(() => ({})); throw new Error(j.error === 'daily cap' ? `今天已经回了 ${j.cap} 条，到上限了` : '太频繁了，等一分钟再试'); }
-  if (r.status === 503) { const e = new Error('团队这一分钟忙不过来（Gemini 免费额度每分钟有上限），30 秒后自动继续'); e.busy = true; throw e; }
-  if (r.status === 502) { const j = await r.json().catch(() => ({})); throw new Error('团队暂时没回应（Gemini 没有回答' + (j.detail ? '：' + j.detail : '') + '），稍后再试'); }
+  // 503：每个模型为什么用不了（2026-10-30 Amos：不要只说"团队忙"，要说清楚是哪个模型、什么原因）
+  if (r.status === 503) { const j = await r.json().catch(() => ({})); const e = new Error('AI 暂时都用不了：' + (j.detail || '免费额度用完') + '。30 秒后自动再试'); e.busy = true; throw e; }
+  if (r.status === 502) { const j = await r.json().catch(() => ({})); throw new Error('AI 没有回答' + (j.detail ? '：' + j.detail : '') + '。稍后再试'); }
   if (!r.ok) throw new Error('中转服务出错了（' + r.status + '）');
   return r.json();
 }
@@ -57,6 +58,10 @@ async function api(path, body) {
 // ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 5 条；10 条一批 Gemini 会超时），Gemini 忙时停 30 秒再继续 ----
 // （2026-10-29 Amos 测试版：滚动几条就报错——每 3 秒一次超过了 Gemini 免费档每分钟的上限）
 const SCORE_EVERY_MS = 10_000;
+/** 75 分以上自动写稿、存进待回复清单（2026-10-30 Amos：超过 75 分的就应该被抓到；手动滑动和自动模式一样） */
+const SAVE_SCORE = 75;
+const saveQ = []; // { tabId, platform, post, score }
+const saveSeen = new Set(); // 已经处理过的帖子（同一条不重复写稿）
 let scoring = false; // 上一批还没回来就不送下一批（Gemini 最长要等 45 秒）
 const pending = []; // { tabId, platform, post }
 let pauseUntil = 0;
@@ -81,7 +86,24 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   return false;
 });
 setInterval(async () => {
-  if (scoring || !pending.length || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  if (scoring || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
+  // 先把 75 分以上的存进清单，再打下一批（一次只做一件事，不挤占 Gemini 的免费额度）
+  if (saveQ.length) {
+    scoring = true;
+    const it = saveQ.shift();
+    try {
+      await saveToList(it);
+    } catch (e) {
+      if (e.busy) { saveQ.unshift(it); pauseUntil = Date.now() + 30_000; } else saveSeen.delete(it.post.id);
+      addLog(`${it.post.author}（${it.score} 分）没存进清单：${e.message}`, e.busy ? 'warn' : 'error');
+      say(e.message);
+      $('msg').dataset.kind = 'score';
+    } finally {
+      scoring = false;
+    }
+    return;
+  }
+  if (!pending.length) return;
   scoring = true;
   const first = pending[0];
   const batch = pending.filter((p) => p.tabId === first.tabId && p.platform === first.platform).slice(0, 5);
@@ -95,6 +117,13 @@ setInterval(async () => {
     if ($('msg').dataset.kind === 'score') say('');
     for (const it of r.items) reasons.set(it.id, it.reasons);
     chrome.tabs.sendMessage(first.tabId, { type: 'qc-scores', platform: first.platform, items: r.items }).catch(() => {});
+    for (const it of r.items.filter((x) => x.score >= SAVE_SCORE && !saveSeen.has(x.id))) {
+      const b = batch.find((x) => x.post.id === it.id);
+      if (!b) continue;
+      saveSeen.add(it.id);
+      saveQ.push({ tabId: b.tabId, platform: b.platform, post: b.post, score: it.score });
+      addLog(`${b.post.author} ${it.score} 分（≥ ${SAVE_SCORE}），排队写稿存进清单`);
+    }
   } catch (e) {
     pending.unshift(...batch); // 没打成分的放回去，下次再送
     if (e.busy) pauseUntil = Date.now() + 30_000;
@@ -107,6 +136,20 @@ setInterval(async () => {
     scoring = false;
   }
 }, SCORE_EVERY_MS);
+
+/** 写稿 → 第一条通过检查的草稿存进待回复清单 → 页面标记"已存进清单"；没有能用的草稿就记一笔 */
+async function saveToList({ tabId, platform, post, score }) {
+  const d = await api('/v1/draft', { product: cfg.product, platform, post });
+  if (!d.drafts.length) {
+    // 页面上的标记保持能点，Amos 可以点开换一批（2026-10-30）
+    addLog(`${post.author}（${score} 分）没有能用的草稿（都没通过检查），没存；可以点帖子旁的标记手动换一批`, 'warn');
+    return false;
+  }
+  const q = await api('/v1/queue', { product: cfg.product, platform, post, score, draft: d.drafts[0].text, source: d.drafts[0].source || '', engine: d.drafts[0].engine || 'gemini' });
+  chrome.tabs.sendMessage(tabId, { type: 'qc-done', id: post.id, text: '副驾驶：已存进清单' }).catch(() => {});
+  addLog(`${post.author}（${score} 分）${q.saved ? '已存进待回复清单' : '清单里已经有了'}${d.drafts[0].engine === 'workers-ai' ? '（备用 AI 写的）' : ''}`);
+  return q.saved;
+}
 
 // ---- 这条 ----
 async function select(c) {
@@ -257,10 +300,11 @@ function autoStop(reason) {
 /** Gemini 忙（503）时等 30 秒再试，最多 3 次；其他错误抛出去让自动模式停下 */
 async function withBusy(fn) {
   for (let i = 0; ; i++) {
-    try { return await fn(); } catch (e) {
+    try { const r = await fn(); if (i) autoMsg(''); return r; } catch (e) {
       if (!e.busy || i >= 2 || !auto.on) throw e;
-      autoView('团队忙，30 秒后继续', 'wait');
-      addLog('团队忙，30 秒后继续', 'warn');
+      autoView('AI 暂时用不了，30 秒后继续', 'wait');
+      autoMsg(e.message);
+      addLog(e.message, 'warn');
       await sleep(30_000);
     }
   }
@@ -300,21 +344,20 @@ async function autoLoop() {
     for (let i = 0; i < posts.length && auto.on; i += 5) {
       const batch = posts.slice(i, i + 5);
       let r;
-      try { r = await withBusy(() => api('/v1/score', { product: cfg.product, platform: auto.platform, posts: batch })); } catch (e) { return autoStop('团队出错：' + e.message); }
+      try { r = await withBusy(() => api('/v1/score', { product: cfg.product, platform: auto.platform, posts: batch })); } catch (e) { return autoStop('AI 出错：' + e.message); }
       auto.scored += r.items.length;
       autoView('等打分结果', 'wait');
       chrome.tabs.sendMessage(auto.tabId, { type: 'qc-scores', platform: auto.platform, items: r.items }).catch(() => {});
       addLog(`自动：打分 ${r.items.map((x) => x.score).join('、')}${r.engine === 'workers-ai' ? '（备用 AI）' : ''}`);
-      for (const it of r.items.filter((x) => x.score >= 60)) {
+      for (const it of r.items.filter((x) => x.score >= SAVE_SCORE && !saveSeen.has(x.id))) {
         if (!auto.on) return;
         const post = batch.find((p) => p.id === it.id);
+        if (!post) continue;
+        saveSeen.add(it.id);
         try {
-          const d = await withBusy(() => api('/v1/draft', { product: cfg.product, platform: auto.platform, post }));
-          if (!d.drafts.length) { addLog(`自动：${post.author} 没有能用的草稿，跳过`); continue; }
-          const q = await api('/v1/queue', { product: cfg.product, platform: auto.platform, post, score: it.score, draft: d.drafts[0].text, source: d.drafts[0].source || '', engine: d.drafts[0].engine || 'gemini' });
-          if (q.saved) { auto.queued += 1; autoView('等打分结果', 'wait'); chrome.tabs.sendMessage(auto.tabId, { type: 'qc-done', id: post.id, text: '副驾驶：已存进清单' }).catch(() => {}); }
-          addLog(`自动：${post.author} 写好草稿，${q.saved ? '已存进清单' : '清单里已经有了'}`);
-        } catch (e) { return autoStop('团队出错：' + e.message); }
+          if (await withBusy(() => saveToList({ tabId: auto.tabId, platform: auto.platform, post, score: it.score }))) auto.queued += 1;
+          autoView('等打分结果', 'wait');
+        } catch (e) { saveSeen.delete(it.id); return autoStop('AI 出错：' + e.message); }
       }
     }
     if (step.end && posts.length === 0) return autoStop('页面到底了');
