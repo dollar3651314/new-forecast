@@ -13,11 +13,24 @@
   <span id="status" class="status">未连接</span>
 </header>
 <nav class="tabs" role="tablist">
+  <button role="tab" data-tab="auto" aria-selected="false">自动</button>
   <button role="tab" data-tab="now" aria-selected="true">这条</button>
   <button role="tab" data-tab="today" aria-selected="false">今天</button>
   <button role="tab" data-tab="log" aria-selected="false">日志</button>
   <button role="tab" data-tab="set" aria-selected="false">设置</button>
 </nav>
+
+<section id="tab-auto" class="sec" hidden>
+  <div class="card">
+    <div class="row"><div><b>自动模式</b><p class="muted small">在当前这个 X / Threads 页面上自己往下滑；每一批分析完才滑下一屏。值得回的写好草稿，存进待回复清单。</p></div>
+      <button id="auto-toggle" class="toggle" role="switch" aria-checked="false" aria-label="自动模式"></button></div>
+    <div class="row"><span id="auto-state" class="pill stop">已停</span><span class="muted small">本次最多 30 分钟 / 60 条，到了自动停</span></div>
+  </div>
+  <div class="kpis"><div class="kpi"><div class="n" id="k-read">0</div><div class="t">本次读到</div></div><div class="kpi"><div class="n" id="k-scored">0</div><div class="t">已打分</div></div><div class="kpi"><div class="n" id="k-queued">0</div><div class="t">进清单</div></div></div>
+  <p id="auto-msg" class="msg" role="status"></p>
+  <a id="open-queue" class="btn primary" href="#" target="_blank" rel="noopener">打开待回复清单</a>
+  <p class="muted small">只读页面上显示的帖子和往下滑；不点赞、不关注、不发帖、不私信。遇到登录页、验证页、错误页立刻停下。切到别的分页或关掉侧边栏也会停。</p>
+</section>
 
 <section id="tab-now" class="sec">
   <div id="empty" class="empty">打开 X 或 Threads 首页往下滑，值得回的帖子下面会出现绿色的"值得回"标记。点一个标记，这里会出现回复草稿。</div>
@@ -36,6 +49,7 @@
       <button id="again" class="btn">换一批</button>
       <button id="skip" class="btn">跳过</button>
     </div>
+    <button id="save-q" class="btn" disabled>存进待回复清单（晚点再回）</button>
     <p class="muted small">点"同意"后会打开平台官方的回复窗口，文字已经填好；看一眼没问题，由你自己按"回复"。</p>
   </div>
   <p id="msg" class="msg" role="status"></p>

@@ -66,8 +66,10 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     addLog(msg.text, msg.level, msg.platform === 'x' ? 'X 页面' : 'Threads 页面');
     return false;
   }
+  if (msg && msg.type === 'qc-auto-hidden') { autoStop('切换了分页或窗口，已停'); return false; }
   if (msg && msg.type === 'qc-posts' && sender.tab) {
     lastContentLog = Date.now();
+    if (auto.on) return false;
     addLog(`收到 ${msg.posts.length} 条帖子，排队等打分（每 10 秒送一批）`);
     for (const post of msg.posts) if (!pending.some((p) => p.post.id === post.id)) pending.push({ tabId: sender.tab.id, platform: msg.platform, post });
     pending.splice(0, Math.max(0, pending.length - 40)); // 只留最近看到的 40 条
@@ -123,6 +125,7 @@ async function select(c) {
 async function loadDrafts() {
   $('drafts').replaceChildren(Object.assign(document.createElement('p'), { className: 'muted', textContent: '团队在写回复…' }));
   $('ok').disabled = true;
+  $('save-q').disabled = true;
   $('checks').hidden = true;
   say('');
   try {
@@ -162,6 +165,7 @@ function renderDrafts(dropped) {
   }));
   $('checks').hidden = false;
   $('ok').disabled = false;
+  $('save-q').disabled = false;
   if (dropped) say(`另外有 ${dropped} 条草稿没通过检查，已拿掉。`, true);
 }
 
@@ -176,6 +180,25 @@ $('ok').addEventListener('click', async () => {
   chrome.tabs.sendMessage(cur.tabId, { type: 'qc-done', id: cur.post.id, text: '副驾驶：已打开回复窗口' }).catch(() => {});
   say('已打开回复窗口，看一眼没问题就按"回复"。', true);
   done();
+});
+$('save-q').addEventListener('click', async () => {
+  const d = cur && cur.drafts[cur.pick];
+  if (!d) return;
+  const b = $('save-q');
+  b.disabled = true;
+  b.textContent = '正在存…';
+  try {
+    const r = await api('/v1/queue', { product: cfg.product, platform: cur.platform, post: cur.post, score: cur.score, draft: d.text, source: d.source || '' });
+    say(r.saved ? '已存进待回复清单，在后台点"一键回复"就行。' : '这条之前已经在清单里了。', true);
+    addLog(`存进清单：${cur.post.author}`);
+    chrome.tabs.sendMessage(cur.tabId, { type: 'qc-done', id: cur.post.id, text: '副驾驶：已存进清单' }).catch(() => {});
+    b.textContent = '存进待回复清单（晚点再回）';
+    done();
+  } catch (e) {
+    say('没存进去：' + e.message);
+    b.disabled = false;
+    b.textContent = '存进待回复清单（晚点再回）';
+  }
 });
 $('again').addEventListener('click', async () => {
   if (!cur) return;
@@ -208,6 +231,97 @@ async function loadToday() {
   } catch (e) { $('today-sum').textContent = e.message; }
 }
 
+// ---- 自动模式（agents C136；状态清单第三节）：侧边栏一步一步驱动页面，每批分析完才滑下一屏 ----
+const AUTO_MAX_MS = 30 * 60_000;
+const AUTO_MAX_POSTS = 60;
+const auto = { on: false, tabId: null, platform: null, started: 0, read: 0, scored: 0, queued: 0 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function autoView(state, kind) {
+  $('auto-state').textContent = state;
+  $('auto-state').className = 'pill ' + kind;
+  $('auto-toggle').setAttribute('aria-checked', String(auto.on));
+  $('k-read').textContent = auto.read;
+  $('k-scored').textContent = auto.scored;
+  $('k-queued').textContent = auto.queued;
+}
+function autoMsg(t, ok) { $('auto-msg').textContent = t; $('auto-msg').classList.toggle('ok', !!ok); }
+function autoStop(reason) {
+  if (!auto.on) return;
+  auto.on = false;
+  if (auto.tabId) chrome.tabs.sendMessage(auto.tabId, { type: 'qc-auto-off' }).catch(() => {});
+  autoView('已停', 'stop');
+  autoMsg(reason);
+  addLog('自动模式停止：' + reason, 'warn');
+}
+/** Gemini 忙（503）时等 30 秒再试，最多 3 次；其他错误抛出去让自动模式停下 */
+async function withBusy(fn) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (!e.busy || i >= 2 || !auto.on) throw e;
+      autoView('团队忙，30 秒后继续', 'wait');
+      addLog('团队忙，30 秒后继续', 'warn');
+      await sleep(30_000);
+    }
+  }
+}
+async function autoStart() {
+  auto.on = false;
+  $('auto-toggle').setAttribute('aria-checked', 'true');
+  autoView('启动中…', 'wait');
+  autoMsg('');
+  const fail = (t) => { auto.on = false; autoView('已停', 'stop'); autoMsg(t); addLog('自动模式没启动：' + t, 'warn'); };
+  if (!cfg.relay || !cfg.token) return fail('先到"设置"填中转服务地址和连接令牌');
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let chk = null;
+  try { chk = tab ? await chrome.tabs.sendMessage(tab.id, { type: 'qc-auto-check' }) : null; } catch { chk = null; }
+  if (!chk || !chk.ok) return fail('当前分页不是 X / Threads，或者页面是装插件之前打开的：请切到 X 首页，刷新一次再开');
+  if (chk.blocked) return fail('页面上有"' + chk.blocked + '"的提示，请先看一眼页面');
+  try { await api('/v1/today'); } catch (e) { return fail(e.message); }
+  Object.assign(auto, { on: true, tabId: tab.id, platform: chk.platform, started: Date.now(), read: 0, scored: 0, queued: 0 });
+  chrome.tabs.sendMessage(tab.id, { type: 'qc-auto-on' }).catch(() => {});
+  addLog('自动模式开始（' + (chk.platform === 'x' ? 'X' : 'Threads') + '）');
+  autoLoop().catch((e) => autoStop('出错了：' + e.message));
+}
+async function autoLoop() {
+  while (auto.on) {
+    if (Date.now() - auto.started >= AUTO_MAX_MS) return autoStop('本次已到上限：30 分钟');
+    if (auto.read >= AUTO_MAX_POSTS) return autoStop('本次已到上限：60 条');
+    autoView('滑动中', 'run');
+    let step;
+    try { step = await chrome.tabs.sendMessage(auto.tabId, { type: 'qc-auto-step' }); } catch { return autoStop('页面没有回应（可能关掉或刷新了）'); }
+    if (!auto.on) return;
+    if (!step || step.hidden) return autoStop('切换了分页或窗口，已停');
+    if (step.blocked) return autoStop('已停：' + step.blocked + '，请看一眼页面');
+    const posts = step.posts.slice(0, AUTO_MAX_POSTS - auto.read);
+    auto.read += posts.length;
+    autoView('等打分结果', 'wait');
+    addLog(`自动：这一屏读到 ${posts.length} 条`);
+    for (let i = 0; i < posts.length && auto.on; i += 5) {
+      const batch = posts.slice(i, i + 5);
+      let r;
+      try { r = await withBusy(() => api('/v1/score', { product: cfg.product, platform: auto.platform, posts: batch })); } catch (e) { return autoStop('团队出错：' + e.message); }
+      auto.scored += r.items.length;
+      autoView('等打分结果', 'wait');
+      chrome.tabs.sendMessage(auto.tabId, { type: 'qc-scores', platform: auto.platform, items: r.items }).catch(() => {});
+      addLog(`自动：打分 ${r.items.map((x) => x.score).join('、')}`);
+      for (const it of r.items.filter((x) => x.score >= 60)) {
+        if (!auto.on) return;
+        const post = batch.find((p) => p.id === it.id);
+        try {
+          const d = await withBusy(() => api('/v1/draft', { product: cfg.product, platform: auto.platform, post }));
+          if (!d.drafts.length) { addLog(`自动：${post.author} 没有能用的草稿，跳过`); continue; }
+          const q = await api('/v1/queue', { product: cfg.product, platform: auto.platform, post, score: it.score, draft: d.drafts[0].text, source: d.drafts[0].source || '' });
+          if (q.saved) { auto.queued += 1; autoView('等打分结果', 'wait'); chrome.tabs.sendMessage(auto.tabId, { type: 'qc-done', id: post.id, text: '副驾驶：已存进清单' }).catch(() => {}); }
+          addLog(`自动：${post.author} 写好草稿，${q.saved ? '已存进清单' : '清单里已经有了'}`);
+        } catch (e) { return autoStop('团队出错：' + e.message); }
+      }
+    }
+    if (step.end && posts.length === 0) return autoStop('页面到底了');
+    await sleep(800);
+  }
+}
+$('auto-toggle').addEventListener('click', () => { if (auto.on) autoStop('你关掉了自动模式'); else autoStart(); });
+
 // ---- 设置 ----
 $('save').addEventListener('click', async () => {
   // 按下后马上有反馈：按钮变成"正在连接…"并且不能再按；结果写在按钮下面（2026-10-29 Amos：点了没有任何反应）
@@ -217,6 +331,7 @@ $('save').addEventListener('click', async () => {
   setNote('正在连接中转服务…', 'busy');
   cfg = { relay: $('relay').value.trim(), token: $('token').value.trim(), product: $('product').value };
   await chrome.storage.local.set({ qc: cfg });
+  queueLink();
   try {
     await api('/v1/today');
     setStatus(true, '营销团队在线');
@@ -233,13 +348,15 @@ $('save').addEventListener('click', async () => {
 
 function switchTab(k) {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
-  for (const x of ['now', 'today', 'log', 'set']) $('tab-' + x).hidden = x !== k;
+  for (const x of ['auto', 'now', 'today', 'log', 'set']) $('tab-' + x).hidden = x !== k;
   if (k === 'today') loadToday();
 }
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
+function queueLink() { $('open-queue').href = cfg.relay ? cfg.relay.replace(/\/+$/, '') + '/' : '#'; }
 chrome.storage.local.get('qc').then(({ qc }) => {
   if (qc) cfg = { ...cfg, ...qc };
+  queueLink();
   $('relay').value = cfg.relay;
   $('token').value = cfg.token;
   $('product').value = cfg.product;

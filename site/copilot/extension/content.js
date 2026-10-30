@@ -68,8 +68,42 @@
     }
   });
 
+  // ---- 自动模式（agents C136）：侧边栏说"下一步"才滑一屏；滑完读屏幕上的新帖子交回去。不点任何东西 ----
+  let autoOn = false;
+  const autoSent = new Set();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function inView(el) {
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.top < innerHeight;
+  }
+  async function autoStep() {
+    if (document.visibilityState !== 'visible') return { hidden: true };
+    const blocked = P.blockedReason(document, location);
+    if (blocked) return { blocked };
+    const before = scrollY;
+    window.scrollBy({ top: Math.round(innerHeight * 0.85), behavior: 'smooth' });
+    await sleep(1800); // 等页面把新帖子画出来
+    scan();
+    const posts = [];
+    for (const [id, k] of known) if (!autoSent.has(id) && k.el.isConnected && inView(k.el)) { autoSent.add(id); posts.push(k.post); }
+    const end = scrollY <= before + 5;
+    return { posts, end, blocked: P.blockedReason(document, location) };
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (autoOn && document.visibilityState !== 'visible') chrome.runtime.sendMessage({ type: 'qc-auto-hidden' }).catch(() => {});
+  });
+  chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+    if (!msg) return false;
+    if (msg.type === 'qc-auto-check') { reply({ ok: true, platform, blocked: P.blockedReason(document, location) }); return false; }
+    if (msg.type === 'qc-auto-on') { autoOn = true; log('自动模式开始'); return false; }
+    if (msg.type === 'qc-auto-off') { autoOn = false; log('自动模式已停'); return false; }
+    if (msg.type === 'qc-auto-step') { autoStep().then(reply); return true; }
+    return false;
+  });
+
   setInterval(() => {
     scan();
+    if (autoOn) return; // 自动模式下由侧边栏一步一步要帖子
     if (known.size !== lastCount) {
       lastCount = known.size;
       if (known.size) log(`页面上累计读到 ${known.size} 条帖子，等待送去打分 ${queue.length} 条`);

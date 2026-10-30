@@ -5,6 +5,8 @@
  * - POST /v1/draft   {product, platform, post}  → {drafts:[{tone, text, source}], dropped}   只给通过程序检查的草稿
  * - POST /v1/log     {product, platform, postId, author?, score?, action: approve|skip|regenerate, draft?}  approve 超过每天上限 → 429
  * - GET  /v1/today   当天（台湾日期）的记录和计数，给插件"今天"页和晚上的小结
+ * - POST /v1/queue   {product, platform, post, score, draft, source}  存进待回复清单（草稿再过一遍程序检查；同一条只存一次）
+ * - GET  /           网页后台"待回复清单"（COPILOT_PASSWORD 没填时 404）；接口在 /api/*（queue.ts）
  * 令牌：Authorization: Bearer <COPILOT_TOKEN>（≥ 24 个字符）。COPILOT_TOKEN 或 GEMINI_API_KEY 没填时 /v1/* 全部 404（默认关着，C102）。
  * Gemini 超额（429）返回 503 + retryAfter，插件自动排队再试；其他 Gemini 错误返回 502 + detail（原因，不含 Key）。
  * 来源：只接受 chrome-extension:// 的请求（有 ALLOWED_ORIGIN 时只接受那一个）；全站每分钟最多 30 次。
@@ -13,6 +15,8 @@ import { checkDraft, isExcludedTopic, type Platform } from './checks';
 import type { Env } from './env';
 import { askJson, GeminiBusy, GeminiError, type FetchLike } from './gemini';
 import { FORECAST_RULES } from '../rules/forecast';
+import { ADMIN_PAGE } from './admin-page';
+import { adminApi, adminEnabled, saveToQueue } from './queue';
 
 const RULES: Record<string, string> = { forecast: FORECAST_RULES };
 const PER_MINUTE = 30;
@@ -154,6 +158,19 @@ async function log(env: Env, body: Record<string, unknown>, now: number, origin:
   return json({ ok: true }, 200, origin);
 }
 
+async function queue(env: Env, body: Record<string, unknown>, now: number, origin: string): Promise<Response> {
+  const product = str(body.product, 32);
+  const platform = platformOf(body.platform);
+  const post = readPost(body.post);
+  const draft = str(body.draft, 600);
+  if (!RULES[product] || !platform || !post || !draft) return json({ error: 'bad request' }, 400, origin);
+  const why = checkDraft(draft, platform);
+  if (why.length) return json({ error: 'draft rejected', why }, 422, origin);
+  const sc = typeof body.score === 'number' ? Math.max(0, Math.min(100, Math.round(body.score))) : null;
+  const r = await saveToQueue(env, now, { product, platform, postId: post.id, author: post.author, text: post.text, ageMinutes: post.ageMinutes, score: sc, draft, source: str(body.source, 120) });
+  return json(r, 200, origin);
+}
+
 async function today(env: Env, now: number, origin: string): Promise<Response> {
   const day = twDay(now);
   const r = await env.DB.prepare("SELECT at, platform, post_id, author, score, action, draft FROM events WHERE day = ?1 AND action IN ('approve', 'skip') ORDER BY at").bind(day).all();
@@ -166,8 +183,14 @@ export async function handle(req: Request, env: Env, now: number, fetcher?: Fetc
   const url = new URL(req.url);
   const p = url.pathname;
   if (p === '/health' && req.method === 'GET') {
-    return json({ status: 'UP', environment: env.ENVIRONMENT ?? 'unknown', version: env.VERSION ?? 'dev', copilot: configured(env) ? 'ok' : 'not_configured' });
+    return json({ status: 'UP', environment: env.ENVIRONMENT ?? 'unknown', version: env.VERSION ?? 'dev', copilot: configured(env) ? 'ok' : 'not_configured', admin: adminEnabled(env) ? 'ok' : 'not_configured' });
   }
+  if ((p === '/' || p === '/queue') && req.method === 'GET') {
+    if (!adminEnabled(env)) return notFound();
+    return new Response(ADMIN_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' } });
+  }
+  const admin = await adminApi(env, req, now);
+  if (admin) return admin;
   if (!p.startsWith('/v1/') || !configured(env)) return notFound();
   const origin = req.headers.get('origin');
   if (!originOk(env, origin)) return notFound();
@@ -189,6 +212,7 @@ export async function handle(req: Request, env: Env, now: number, fetcher?: Fetc
     if (p === '/v1/score') return await score(env, body, origin!, fetcher);
     if (p === '/v1/draft') return await draft(env, body, now, origin!, fetcher);
     if (p === '/v1/log') return await log(env, body, now, origin!);
+    if (p === '/v1/queue') return await queue(env, body, now, origin!);
     return notFound();
   } catch (e) {
     if (e instanceof GeminiBusy) {
