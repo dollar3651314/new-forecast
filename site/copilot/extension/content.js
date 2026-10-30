@@ -77,7 +77,8 @@
     return r.bottom > 0 && r.top < innerHeight;
   }
   async function autoStep() {
-    if (document.visibilityState !== 'visible') return { hidden: true };
+    // 0.3.2（Amos 2026-10-30 选 A'）：页面"看不见"不再停（窗口叠着、露一半也会被 Chrome 当成看不见），只报给侧边栏；切分页由侧边栏判断
+    const hidden = document.visibilityState !== 'visible';
     const blocked = P.blockedReason(document, location);
     if (blocked) return { blocked };
     const before = scrollY;
@@ -87,11 +88,8 @@
     const posts = [];
     for (const [id, k] of known) if (!autoSent.has(id) && k.el.isConnected && inView(k.el)) { autoSent.add(id); posts.push(k.post); }
     const end = scrollY <= before + 5;
-    return { posts, end, blocked: P.blockedReason(document, location) };
+    return { posts, end, hidden, blocked: P.blockedReason(document, location) };
   }
-  document.addEventListener('visibilitychange', () => {
-    if (autoOn && document.visibilityState !== 'visible') chrome.runtime.sendMessage({ type: 'qc-auto-hidden' }).catch(() => {});
-  });
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (!msg) return false;
     if (msg.type === 'qc-auto-check') { reply({ ok: true, platform, blocked: P.blockedReason(document, location) }); return false; }
