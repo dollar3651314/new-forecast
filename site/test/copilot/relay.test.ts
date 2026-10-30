@@ -280,6 +280,12 @@ describe('写稿和程序检查', () => {
     expect(checkDraft('别错过这场', 'threads')).toContain('不能说的话：别错过');
     expect(checkDraft('去 quickcome 看看', 'x')).toContain('提到了产品');
     expect(checkDraft('www.abc.tw', 'x')).toContain('有链接');
+    // R-1、R-2（2026-10-30）：下注相关说法；原帖没有的夸大结论
+    expect(checkDraft('對加密幣與體育彩池可能有間接影響', 'x')).toContain('不能说的话：彩池');
+    expect(checkDraft('賠率怎麼看', 'x')).toContain('不能说的话：賠率');
+    expect(checkDraft('BlackRock 的 IBIT 近日資金流入破紀錄', 'x', 'IBIT recorded $136 million inflows')).toContain('原帖没有的结论：破紀錄');
+    expect(checkDraft('BTC 創歷史新高了', 'x', 'BTC hits all-time high')).toContain('原帖没有的结论：創歷史新高');
+    expect(checkDraft('資金流入破紀錄', 'x', '今天資金流入破紀錄')).toEqual([]);
   });
 });
 
