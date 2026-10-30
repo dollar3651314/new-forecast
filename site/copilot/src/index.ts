@@ -102,7 +102,7 @@ async function score(env: Env, body: Record<string, unknown>, now: number, origi
     const r = await askAi(
       env,
       RULES[product],
-      `平台：${platform === 'x' ? 'X' : 'Threads'}。下面是 Amos 首页上看到的帖子（JSON）。逐条按规则打 0～100 分，给 1～3 条简短理由（简体中文）。` +
+      `平台：${platform === 'x' ? 'X' : 'Threads'}。下面是 Amos 首页上看到的帖子（JSON）。逐条按规则打 0～100 分，分数精确到 1 分（例如 72、83、91），不要只用 5 或 10 的倍数，好坏相近的帖子也要拉开差距；给 1～3 条简短理由（简体中文）。` +
         `只回答 JSON：{"items":[{"id":"…","score":0,"reasons":["…"]}]}。\n` +
         JSON.stringify(ask.map((p) => ({ id: p.id, author: p.author, text: p.text, replies: p.replies, ageMinutes: p.ageMinutes }))),
       now,
