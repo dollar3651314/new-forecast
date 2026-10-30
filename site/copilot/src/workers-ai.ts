@@ -12,8 +12,8 @@ export const WAI_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
 /** 每百万 token 的 neurons（Cloudflare 价格页，2026-10-30） */
 const IN_PER_M = 4_625;
 const OUT_PER_M = 30_475;
-const MAX_OUT = 1_500;
-/** 一次最多可能用的 neurons：输入按 8,000 token、输出按 MAX_OUT 算，约 83 */
+const MAX_OUT = 2_000;
+/** 一次最多可能用的 neurons：输入按 8,000 token、输出按 MAX_OUT 算，约 98 */
 export const RESERVE = Math.ceil((8_000 * IN_PER_M + MAX_OUT * OUT_PER_M) / 1e6);
 export const DEFAULT_DAILY_NEURONS = 8_000;
 
@@ -60,11 +60,13 @@ export function extractJson(text: string): unknown {
   } catch {
     const a = t.indexOf('{');
     const b = t.lastIndexOf('}');
-    if (a < 0 || b <= a) throw new WorkersAiError('Workers AI 回答不是 JSON');
+    // 带上回答的开头和结尾几个字，看得出是被截断还是答非所问（2026-10-30 测试版出现过一次）
+    const bad = () => new WorkersAiError(`Workers AI 回答不是 JSON（${t.length} 字：${t.slice(0, 40).replace(/\s+/g, ' ')}…${t.slice(-20).replace(/\s+/g, ' ')}）`);
+    if (a < 0 || b <= a) throw bad();
     try {
       return JSON.parse(t.slice(a, b + 1));
     } catch {
-      throw new WorkersAiError('Workers AI 回答不是 JSON');
+      throw bad();
     }
   }
 }

@@ -77,9 +77,14 @@ async function login(env: Env, req: Request, now: number): Promise<Response> {
 }
 
 const cap = (env: Env) => Math.max(1, Math.min(50, Number(env.DAILY_REPLY_CAP) || 10));
-async function doneToday(env: Env, now: number): Promise<number> {
-  const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM queue WHERE status = 'done' AND done_day = ?1").bind(twDay(now)).first<{ n: number }>();
-  return r?.n ?? 0;
+/** 今天回了几条：插件"同意"（events.approve）+ 后台"我回了"（queue.done），两边合起来算每天上限（2026-10-30） */
+export async function doneToday(env: Env, now: number): Promise<number> {
+  const day = twDay(now);
+  const [a, b] = await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) AS n FROM queue WHERE status = 'done' AND done_day = ?1").bind(day).first<{ n: number }>(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE day = ?1 AND action = 'approve'").bind(day).first<{ n: number }>(),
+  ]);
+  return (a?.n ?? 0) + (b?.n ?? 0);
 }
 
 /** 后台的接口（/api/*）；不是后台的地址返回 null */

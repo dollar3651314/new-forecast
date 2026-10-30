@@ -23,9 +23,21 @@ function addLog(text, level = 'info', from = '侧边栏') {
   $('log-list').prepend(li);
   while ($('log-list').children.length > 200) $('log-list').lastChild.remove();
 }
+const logText = () => logs.slice().reverse().map((l) => `${l.t.toTimeString().slice(0, 8)} [${l.from}] [${l.level}] ${l.text}`).join('\n');
 $('log-copy').addEventListener('click', async () => {
-  const txt = logs.map((l) => `${l.t.toTimeString().slice(0, 8)} [${l.from}] ${l.text}`).join('\n');
-  try { await navigator.clipboard.writeText(txt); addLog('日志已复制'); } catch { addLog('复制失败，请手动选取', 'warn'); }
+  const n = logs.length;
+  try { await navigator.clipboard.writeText(logText()); addLog(`日志已复制（${n} 条）`); } catch { addLog('复制失败，请用"下载日志"', 'warn'); }
+});
+// 下载成 txt 文件（2026-10-30 Amos：复制只看到最新一条；下载的文件可以直接发给团队看）
+// 链接本身就是下载按钮：按下时才生成文件（不用程序代按，parse.test.ts 有检查）
+$('log-dl').addEventListener('click', (e) => {
+  const a = e.currentTarget;
+  const n = logs.length;
+  const url = URL.createObjectURL(new Blob([logText() + '\n'], { type: 'text/plain;charset=utf-8' }));
+  a.href = url;
+  a.download = `copilot-log-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.txt`;
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  addLog(`日志已下载（${n} 条，按时间从早到晚）`);
 });
 $('log-clear').addEventListener('click', () => { logs.length = 0; $('log-list').replaceChildren(); });
 addLog('侧边栏已打开');
@@ -62,6 +74,14 @@ const SCORE_EVERY_MS = 10_000;
 const SAVE_SCORE = 75;
 const saveQ = []; // { tabId, platform, post, score }
 const saveSeen = new Set(); // 已经处理过的帖子（同一条不重复写稿）
+// 手动页的计数（从打开侧边栏算起；2026-10-30 Amos：要看得到抓到了多少条）
+const man = { read: new Set(), scored: 0, queued: 0 };
+function manView() {
+  $('m-read').textContent = man.read.size;
+  $('m-scored').textContent = man.scored;
+  $('m-queued').textContent = man.queued;
+  $('m-state').textContent = `从打开侧边栏算起；排队等打分 ${pending.length} 条，等写稿存清单 ${saveQ.length} 条`;
+}
 let scoring = false; // 上一批还没回来就不送下一批（Gemini 最长要等 45 秒）
 const pending = []; // { tabId, platform, post }
 let pauseUntil = 0;
@@ -76,8 +96,12 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     lastContentLog = Date.now();
     if (auto.on) return false;
     addLog(`收到 ${msg.posts.length} 条帖子，排队等打分（每 10 秒送一批）`);
-    for (const post of msg.posts) if (!pending.some((p) => p.post.id === post.id)) pending.push({ tabId: sender.tab.id, platform: msg.platform, post });
+    for (const post of msg.posts) {
+      man.read.add(post.id);
+      if (!pending.some((p) => p.post.id === post.id)) pending.push({ tabId: sender.tab.id, platform: msg.platform, post });
+    }
     pending.splice(0, Math.max(0, pending.length - 40)); // 只留最近看到的 40 条
+    manView();
     return false;
   }
   if (msg && msg.type === 'qc-select' && sender.tab) {
@@ -92,7 +116,7 @@ setInterval(async () => {
     scoring = true;
     const it = saveQ.shift();
     try {
-      await saveToList(it);
+      if (await saveToList(it)) man.queued += 1;
     } catch (e) {
       if (e.busy) { saveQ.unshift(it); pauseUntil = Date.now() + 30_000; } else saveSeen.delete(it.post.id);
       addLog(`${it.post.author}（${it.score} 分）没存进清单：${e.message}`, e.busy ? 'warn' : 'error');
@@ -100,6 +124,7 @@ setInterval(async () => {
       $('msg').dataset.kind = 'score';
     } finally {
       scoring = false;
+      manView();
     }
     return;
   }
@@ -115,6 +140,7 @@ setInterval(async () => {
     addLog(`打分完成：${r.items.length} 条，其中值得回 ${good} 条（分数：${r.items.map((it) => it.score).join('、')}）`);
     setStatus(true, '营销团队在线');
     if ($('msg').dataset.kind === 'score') say('');
+    man.scored += r.items.length;
     for (const it of r.items) reasons.set(it.id, it.reasons);
     chrome.tabs.sendMessage(first.tabId, { type: 'qc-scores', platform: first.platform, items: r.items }).catch(() => {});
     for (const it of r.items.filter((x) => x.score >= SAVE_SCORE && !saveSeen.has(x.id))) {
@@ -134,6 +160,7 @@ setInterval(async () => {
     $('msg').dataset.kind = 'score';
   } finally {
     scoring = false;
+    manView();
   }
 }, SCORE_EVERY_MS);
 
@@ -261,15 +288,18 @@ function done() { cur = null; $('cur').hidden = true; $('empty').hidden = false;
 async function loadToday() {
   try {
     const r = await api('/v1/today');
-    $('today-sum').textContent = `${r.day}：已同意 ${r.approved} 条（上限 ${r.cap}），跳过 ${r.skipped} 条`;
+    // 插件"同意"和后台"我回了"都算回了（2026-10-30：在后台回了 2 条，"今天"却是空的）
+    const ACT = { approve: '同意', done: '我回了', skip: '跳过', saved: '进清单' };
+    $('today-sum').textContent = `${r.day}：进清单 ${r.saved} 条，已回 ${r.approved} 条（上限 ${r.cap}），跳过 ${r.skipped} 条`;
     $('today-rows').replaceChildren(...r.items.map((x) => {
       const tr = document.createElement('tr');
       const t = new Date(x.at + 8 * 3600e3).toISOString().slice(11, 16);
-      for (const v of [t, `${P_URL[x.platform] || x.platform} ${x.author || ''}`, x.action === 'approve' ? '同意' : '跳过']) tr.append(Object.assign(document.createElement('td'), { textContent: v }));
+      for (const v of [t, `${P_URL[x.platform] || x.platform} ${x.author || ''}${x.score != null ? ' · ' + x.score + ' 分' : ''}`, ACT[x.action] || x.action]) tr.append(Object.assign(document.createElement('td'), { textContent: v }));
       return tr;
     }));
+    if (!r.items.length) $('today-rows').append(Object.assign(document.createElement('tr'), { innerHTML: '<td colspan="3" class="muted">今天还没有记录</td>' }));
     $('copy').onclick = async () => {
-      const lines = [`副驾驶 ${r.day}：同意 ${r.approved} 条、跳过 ${r.skipped} 条`, ...r.items.filter((x) => x.action === 'approve').map((x) => `- ${P_URL[x.platform]} ${x.author}（${x.score ?? '–'} 分）：${x.draft}`)];
+      const lines = [`副驾驶 ${r.day}：进清单 ${r.saved} 条、已回 ${r.approved} 条、跳过 ${r.skipped} 条`, ...r.items.filter((x) => x.action === 'approve' || x.action === 'done').map((x) => `- ${P_URL[x.platform]} ${x.author}（${x.score ?? '–'} 分）：${x.draft}`)];
       try { await navigator.clipboard.writeText(lines.join('\n')); say('已复制，贴到对话里就行。', true); } catch { say('复制失败，请手动选取'); }
     };
   } catch (e) { $('today-sum').textContent = e.message; }

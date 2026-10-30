@@ -360,4 +360,19 @@ describe('待回复清单（C136）', () => {
     expect((await tryPw(PASS, T0, '198.51.100.8')).status).toBe(200);
     expect((await tryPw(PASS, T0 + 15 * 60_000 + 1)).status).toBe(200);
   });
+  it('"今天"把清单也算进去：进清单、后台"我回了"；插件"同意"和后台"我回了"合起来算每天上限', async () => {
+    await save('Curry 會先熱手嗎？', 'q1');
+    await save('湖人今晚誰先發？', 'q2');
+    const ck = await loginCookie();
+    const list = (await (await handle(page('/api/queue?status=pending', { cookie: ck }), env(), T0)).json()) as { items: { id: number }[] };
+    expect((await handle(page(`/api/queue/${list.items[0].id}`, { method: 'POST', cookie: ck, body: JSON.stringify({ status: 'done' }) }), env(), T0 + 60_000)).status).toBe(200);
+    const t = (await (await handle(req('GET', '/v1/today'), env(), T0 + 120_000)).json()) as { saved: number; approved: number; skipped: number; items: { action: string }[] };
+    expect(t).toMatchObject({ saved: 2, approved: 1, skipped: 0 });
+    expect(t.items.map((x) => x.action)).toEqual(['saved', 'saved', 'done']);
+    // 上限 2：后台回了 1 条，插件再同意 1 条就到了
+    const log = (id: string) => handle(req('POST', '/v1/log', { product: 'forecast', platform: 'x', postId: id, action: 'approve' }), env(), T0);
+    expect((await log('p1')).status).toBe(200);
+    expect((await log('p2')).status).toBe(429);
+    expect((await handle(page(`/api/queue/${list.items[1].id}`, { method: 'POST', cookie: ck, body: JSON.stringify({ status: 'done' }) }), env(), T0)).status).toBe(429);
+  });
 });
