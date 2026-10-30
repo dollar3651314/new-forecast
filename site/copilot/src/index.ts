@@ -226,8 +226,9 @@ export async function handle(req: Request, env: Env, now: number, fetcher?: Fetc
     return notFound();
   } catch (e) {
     if (e instanceof GeminiBusy) {
-      console.log(JSON.stringify({ event: 'copilot.gemini_busy' }));
-      return json({ error: 'team busy', retryAfter: 30 }, 503, origin);
+      console.log(JSON.stringify({ event: 'copilot.gemini_busy', detail: e.message }));
+      // detail：每个模型为什么用不了（例如"Workers AI 今天用到 8000 上限"），插件照着显示
+      return json({ error: 'team busy', retryAfter: 30, detail: e.message }, 503, origin);
     }
     if (e instanceof GeminiError) {
       console.log(JSON.stringify({ event: 'copilot.gemini_error', detail: e.message }));

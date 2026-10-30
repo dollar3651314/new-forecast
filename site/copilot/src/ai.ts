@@ -23,8 +23,8 @@ export async function ask(env: Env, system: string, user: string, now: number, f
     console.log(JSON.stringify({ event: 'copilot.fallback_workers_ai', reason: first.message }));
     return { data, engine: 'workers-ai' };
   } catch (e) {
-    if (first instanceof GeminiBusy || e instanceof WorkersAiCap) throw new GeminiBusy(`${first.message}; ${(e as Error).message}`);
-    throw new GeminiError(`${first.message}; ${(e as Error).message}`);
+    if (first instanceof GeminiBusy || e instanceof WorkersAiCap) throw new GeminiBusy(`${first.message}；${(e as Error).message}`);
+    throw new GeminiError(`${first.message}；${(e as Error).message}`);
   }
 }
 

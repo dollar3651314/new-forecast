@@ -111,7 +111,7 @@ describe('打分', () => {
     expect(r.status).toBe(502);
     // 原因给插件显示，不含 Key
     const j = (await r.json()) as { detail: string };
-    expect(j.detail).toBe('no model available (gemini-flash-latest: HTTP 500)');
+    expect(j.detail).toContain('gemini-flash-latest Google 那边出错（500）');
     expect(JSON.stringify(j)).not.toContain('ci_only_gemini_key');
   });
   it('思考强度设成 low；模型不认这个设置（400）就去掉再试一次', async () => {
@@ -132,7 +132,12 @@ describe('打分', () => {
     const g = fakeGemini(...[1, 2, 3].map(() => new Response('quota', { status: 429 })));
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
     expect(r.status).toBe(503);
-    expect(await r.json()).toEqual({ error: 'team busy', retryAfter: 30 });
+    // 503 带每个模型的原因（2026-10-30 Amos：不要只说"团队忙"）
+    expect(await r.json()).toEqual({
+      error: 'team busy',
+      retryAfter: 30,
+      detail: 'gemini-3.6-flash 免费额度用完（429）；gemini-3.8-flash 免费额度用完（429）；gemini-flash-latest 免费额度用完（429）',
+    });
   });
   it('某个模型超时或 5xx 就换下一个；诊断接口报每个模型的状态（不含 Key）', async () => {
     const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ id: POST.id, score: 66, reasons: [] }] }) }] } }] };
@@ -161,7 +166,7 @@ describe('打分', () => {
     const all404 = fakeGemini(...[1, 2, 3].map(() => new Response('no', { status: 404 })));
     const r2 = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, all404.fetcher);
     expect(r2.status).toBe(502);
-    expect(((await r2.json()) as { detail: string }).detail).toContain('gemini-flash-latest: HTTP 404');
+    expect(((await r2.json()) as { detail: string }).detail).toContain('gemini-flash-latest 这个 Key 用不了（404）');
   });
 });
 
@@ -209,6 +214,7 @@ describe('备用 AI（Workers AI，2026-10-30 Amos 选 A）', () => {
     const ai = fakeAi();
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai.AI }), T0, fakeGemini(...quota()).fetcher);
     expect(r.status).toBe(503);
+    expect(((await r.json()) as { detail: string }).detail).toMatch(/免费额度用完（429）；Workers AI 今天用到 8000 上限（台湾早上 8 点重置）$/);
     expect(ai.calls).toHaveLength(0);
     // 第二天（UTC）重新算
     const ai2 = fakeAi({ response: '{"items":[]}', usage: { prompt_tokens: 10, completion_tokens: 5 } });
@@ -219,8 +225,8 @@ describe('备用 AI（Workers AI，2026-10-30 Amos 选 A）', () => {
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai.AI }), T0, fakeGemini(new Response('bad', { status: 403 })).fetcher);
     expect(r.status).toBe(502);
     const j = (await r.json()) as { detail: string };
-    expect(j.detail).toContain('HTTP 403');
-    expect(j.detail).toContain('workers-ai: upstream exploded');
+    expect(j.detail).toContain('出错（HTTP 403）');
+    expect(j.detail).toContain('Workers AI 出错：upstream exploded');
     expect(await used()).toBe(RESERVE);
   });
   it('备用 AI 写的草稿带标记，存进清单后后台也能看到；测试 AI 报备用 AI 和今天用量', async () => {

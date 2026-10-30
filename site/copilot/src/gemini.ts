@@ -42,7 +42,7 @@ async function callModel(env: Env, model: string, system: string, user: string, 
       signal: AbortSignal.timeout(PER_MODEL_MS),
     });
   } catch (e) {
-    throw new GeminiError(`${model}: ${(e as Error)?.name === 'TimeoutError' ? 'timeout' : 'network'}`);
+    throw new GeminiError((e as Error)?.name === 'TimeoutError' ? `${PER_MODEL_MS / 1000} 秒没回答` : '连不上');
   }
 }
 
@@ -63,8 +63,12 @@ export async function diagnose(env: Env, fetcher: FetchLike = fetch): Promise<{ 
   return out;
 }
 
+/**
+ * 每个模型失败的原因用中文写进 tried（2026-10-30 Amos：到上限时要说清楚是哪个模型、什么原因，不要只说"团队忙"）。
+ * 全都超额 → GeminiBusy；其他 → GeminiError；message 是每个模型的原因（不含 Key）。
+ */
 export async function askJson(env: Env, system: string, user: string, fetcher: FetchLike = fetch): Promise<unknown> {
-  let last = '';
+  const tried: string[] = [];
   let busy = false;
   for (const model of modelList(env)) {
     const call = (lowThinking: boolean) => callModel(env, model, system, user, lowThinking, fetcher);
@@ -74,28 +78,32 @@ export async function askJson(env: Env, system: string, user: string, fetcher: F
       if (res.status === 400) res = await call(false);
     } catch (e) {
       // 超时、网络出错：换下一个模型
-      last = (e as Error).message;
+      tried.push(`${model} ${(e as Error).message}`);
       continue;
     }
-    if (res.status === 404 || res.status >= 500) {
-      last = `${model}: HTTP ${res.status}`;
+    if (res.status === 404) {
+      tried.push(`${model} 这个 Key 用不了（404）`);
+      continue;
+    }
+    if (res.status >= 500) {
+      tried.push(`${model} Google 那边出错（${res.status}）`);
       continue;
     }
     if (res.status === 429) {
       // 免费额度按模型算：这个模型超额就换下一个；全都超额才算"忙"（2026-10-30 测试版一直"团队忙"）
       busy = true;
-      last = `${model}: HTTP 429`;
+      tried.push(`${model} 免费额度用完（429）`);
       continue;
     }
-    if (!res.ok) throw new GeminiError(`${model}: HTTP ${res.status}`);
+    if (!res.ok) throw new GeminiError([...tried, `${model} 出错（HTTP ${res.status}）`].join('；'));
     const body = (await res.json()) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
     const text = body.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
     try {
       return parseLoose(text);
     } catch {
-      throw new GeminiError(`${model}: not json`);
+      throw new GeminiError([...tried, `${model} 回答不是 JSON`].join('；'));
     }
   }
-  if (busy) throw new GeminiBusy(last);
-  throw new GeminiError(`no model available (${last})`);
+  if (busy) throw new GeminiBusy(tried.join('；'));
+  throw new GeminiError(tried.join('；') || '没有可用的模型');
 }
