@@ -19,7 +19,7 @@ import { ask as askAi, diagnose } from './ai';
 import { GeminiBusy, GeminiError, type FetchLike } from './gemini';
 import { FORECAST_RULES } from '../rules/forecast';
 import { ADMIN_PAGE } from './admin-page';
-import { adminApi, adminEnabled, saveToQueue } from './queue';
+import { adminApi, adminEnabled, doneToday, saveToQueue } from './queue';
 
 const RULES: Record<string, string> = { forecast: FORECAST_RULES };
 const PER_MINUTE = 30;
@@ -159,8 +159,7 @@ async function log(env: Env, body: Record<string, unknown>, now: number, origin:
   if (!RULES[product] || !platform || !POST_ID.test(postId) || !['approve', 'skip', 'regenerate'].includes(action)) return json({ error: 'bad request' }, 400, origin);
   if (action === 'approve') {
     const cap = Math.max(1, Math.min(50, Number(env.DAILY_REPLY_CAP) || 10));
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE day = ?1 AND action = 'approve'").bind(twDay(now)).first<{ n: number }>();
-    if ((n?.n ?? 0) >= cap) return json({ error: 'daily cap', cap }, 429, origin);
+    if ((await doneToday(env, now)) >= cap) return json({ error: 'daily cap', cap }, 429, origin);
   }
   const sc = typeof body.score === 'number' ? Math.max(0, Math.min(100, Math.round(body.score))) : null;
   await logEvent(env, now, { product, platform, postId, author: str(body.author, 64), score: sc, action, draft: str(body.draft, 600) });
@@ -180,12 +179,29 @@ async function queue(env: Env, body: Record<string, unknown>, now: number, origi
   return json(r, 200, origin);
 }
 
+/**
+ * 当天（台湾日期）的记录：插件里的"同意 / 跳过"，加上待回复清单里今天"进清单 / 我回了 / 跳过"的
+ * （2026-10-30 Amos：在后台清单里回了 2 条，"今天"却是空的——原来只算插件里按"同意"的）
+ */
 async function today(env: Env, now: number, origin: string): Promise<Response> {
   const day = twDay(now);
-  const r = await env.DB.prepare("SELECT at, platform, post_id, author, score, action, draft FROM events WHERE day = ?1 AND action IN ('approve', 'skip') ORDER BY at").bind(day).all();
-  const rows = r.results ?? [];
+  const from = Date.parse(`${day}T00:00:00+08:00`);
+  const to = from + 24 * 3600_000;
+  const [ev, q] = await Promise.all([
+    env.DB.prepare("SELECT at, platform, post_id, author, score, action, draft FROM events WHERE day = ?1 AND action IN ('approve', 'skip') ORDER BY at").bind(day).all<{ at: number; platform: string; post_id: string; author: string; score: number | null; action: string; draft: string }>(),
+    env.DB.prepare('SELECT at, updated_at, platform, post_id, author, score, draft, status, done_day FROM queue WHERE (at >= ?1 AND at < ?2) OR (updated_at >= ?1 AND updated_at < ?2) OR done_day = ?3').bind(from, to, day).all<{ at: number; updated_at: number; platform: string; post_id: string; author: string; score: number | null; draft: string; status: string; done_day: string | null }>(),
+  ]);
+  const items: { at: number; platform: string; author: string; score: number | null; action: string; draft: string }[] = (ev.results ?? []).map((x) => ({ at: x.at, platform: x.platform, author: x.author, score: x.score, action: x.action, draft: x.draft }));
+  for (const x of q.results ?? []) {
+    const base = { platform: x.platform, author: x.author, score: x.score, draft: x.draft };
+    if (x.at >= from && x.at < to) items.push({ ...base, at: x.at, action: 'saved' });
+    if (x.status === 'done' && x.done_day === day) items.push({ ...base, at: x.updated_at, action: 'done' });
+    if (x.status === 'skip' && x.updated_at >= from && x.updated_at < to) items.push({ ...base, at: x.updated_at, action: 'skip' });
+  }
+  items.sort((a, b) => a.at - b.at);
   const cap = Math.max(1, Math.min(50, Number(env.DAILY_REPLY_CAP) || 10));
-  return json({ day, cap, approved: rows.filter((x) => x.action === 'approve').length, skipped: rows.filter((x) => x.action === 'skip').length, items: rows }, 200, origin);
+  const count = (a: string) => items.filter((x) => x.action === a).length;
+  return json({ day, cap, approved: count('approve') + count('done'), skipped: count('skip'), saved: count('saved'), items }, 200, origin);
 }
 
 export async function handle(req: Request, env: Env, now: number, fetcher?: FetchLike): Promise<Response> {

@@ -14,7 +14,7 @@
 </header>
 <nav class="tabs" role="tablist">
   <button role="tab" data-tab="auto" aria-selected="false">自动</button>
-  <button role="tab" data-tab="now" aria-selected="true">这条</button>
+  <button role="tab" data-tab="now" aria-selected="true">手动</button>
   <button role="tab" data-tab="today" aria-selected="false">今天</button>
   <button role="tab" data-tab="log" aria-selected="false">日志</button>
   <button role="tab" data-tab="set" aria-selected="false">设置</button>
@@ -33,7 +33,10 @@
 </section>
 
 <section id="tab-now" class="sec">
-  <div id="empty" class="empty">打开 X 或 Threads 首页往下滑，值得回的帖子下面会出现绿色的"值得回"标记。点一个标记，这里会出现回复草稿。</div>
+  <!-- 2026-10-30 Amos："这条"改成"手动"（自己滑页面时的辅助），抓到多少条也要显示出来，和自动模式一样 -->
+  <div class="kpis"><div class="kpi"><div class="n" id="m-read">0</div><div class="t">读到</div></div><div class="kpi"><div class="n" id="m-scored">0</div><div class="t">已打分</div></div><div class="kpi"><div class="n" id="m-queued">0</div><div class="t">进清单（≥ 75 分）</div></div></div>
+  <p id="m-state" class="muted small">从打开侧边栏算起；排队等打分 0 条</p>
+  <div id="empty" class="empty">打开 X 或 Threads 首页往下滑：75 分以上的自动写稿存进待回复清单；60 分以上的帖子下面有绿色"值得回"标记，点一个，这里会出现回复草稿。</div>
   <div id="cur" hidden>
     <div class="lbl">帖子</div>
     <p id="cur-author" class="muted"></p>
@@ -56,7 +59,7 @@
 </section>
 
 <section id="tab-today" class="sec" hidden>
-  <div class="lbl">今天的回复</div>
+  <div class="lbl">今天（插件和待回复清单合起来）</div>
   <p id="today-sum" class="muted"></p>
   <div class="tablewrap"><table><thead><tr><th>时间</th><th>帖子</th><th>动作</th></tr></thead><tbody id="today-rows"></tbody></table></div>
   <button id="copy" class="btn">复制今天的记录（贴到晚上的小结）</button>
@@ -64,7 +67,7 @@
 
 <section id="tab-log" class="sec" hidden>
   <div class="lbl">插件在做什么（最近 200 条，只存在这台电脑，关掉侧边栏就清空）</div>
-  <div class="logbar"><button id="log-copy" class="btn">复制日志</button><button id="log-clear" class="btn">清空</button></div>
+  <div class="logbar"><a id="log-dl" class="btn" href="#" download="copilot-log.txt">下载日志（全部）</a><button id="log-copy" class="btn">复制日志</button><button id="log-clear" class="btn">清空</button></div>
   <ol id="log-list" class="log" aria-live="polite"></ol>
 </section>
 

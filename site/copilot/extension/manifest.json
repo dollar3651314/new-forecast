@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Quick Come 副驾驶",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "刷 X、Threads 首页时，营销团队标出值得回的帖子、写回复草稿；你同意后在官方回复窗口自己按发送。",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage"],
