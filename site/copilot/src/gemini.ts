@@ -12,7 +12,8 @@ export class GeminiError extends Error {}
 export class GeminiBusy extends Error {}
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
-export const DEFAULT_MODELS = 'gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest';
+// 2026-10-30 测试 AI：3.8-flash 和 flash-latest 免费额度 429，只有 3.6-flash 正常 → 3.6 放第一个
+export const DEFAULT_MODELS = 'gemini-3.6-flash,gemini-3.8-flash,gemini-flash-latest';
 
 export function modelList(env: Env): string[] {
   const list = (env.GEMINI_MODEL || DEFAULT_MODELS).split(',').map((m) => m.trim()).filter((m) => /^[a-z0-9.-]{3,64}$/.test(m));

@@ -9,6 +9,7 @@ import { getPlatformProxy } from 'wrangler';
 import { checkDraft, xLength } from '../../copilot/src/checks';
 import type { Env } from '../../copilot/src/env';
 import { handle, twDay } from '../../copilot/src/index';
+import { extractJson, RESERVE } from '../../copilot/src/workers-ai';
 import { SITE_DIR, T0 } from '../worker/helpers';
 
 const TOKEN = 'ci_only_copilot_token_0123456789';
@@ -26,7 +27,7 @@ beforeAll(async () => {
 });
 afterAll(async () => dispose());
 beforeEach(async () => {
-  await db.batch(['events', 'rate', 'queue', 'auth_fail', 'auth_lock'].map((t) => db.prepare(`DELETE FROM ${t}`)));
+  await db.batch(['events', 'rate', 'queue', 'auth_fail', 'auth_lock', 'ai_usage'].map((t) => db.prepare(`DELETE FROM ${t}`)));
 });
 
 const PASS = 'ci_only_copilot_password_01';
@@ -91,6 +92,7 @@ describe('打分', () => {
         { id: pol.id, score: 0, reasons: ['政治或排除的题目'] },
         { id: miss.id, score: 0, reasons: ['团队没有给出评分'] },
       ],
+      engine: 'gemini',
     });
     expect(g.calls).toHaveLength(1);
     expect(g.calls[0].key).toBe('ci_only_gemini_key');
@@ -116,7 +118,7 @@ describe('打分', () => {
     const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ id: POST.id, score: 65, reasons: [] }] }) }] } }] };
     const g = fakeGemini(new Response('bad field', { status: 400 }), new Response(JSON.stringify(ok), { status: 200 }));
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
-    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 65, reasons: [] }] });
+    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 65, reasons: [] }], engine: 'gemini' });
     const cfgs = g.calls.map((c) => (c.body as unknown as { generationConfig: Record<string, unknown> }).generationConfig);
     expect(cfgs[0]).toMatchObject({ thinkingConfig: { thinkingLevel: 'low' } });
     expect(cfgs[1].thinkingConfig).toBeUndefined();
@@ -146,20 +148,94 @@ describe('打分', () => {
     expect(n).toBe(3);
     const d = await handle(req('GET', '/v1/diag'), env(), T0, async (url: string) => (url.includes('3.8') ? new Response('{"error":"key AIzaSyFAKE123 bad"}', { status: 403 }) : new Response(JSON.stringify(ok), { status: 200 })));
     const models = ((await d.json()) as { models: { model: string; ok: boolean; detail: string }[] }).models;
-    expect(models.map((m) => [m.model, m.ok])).toEqual([['gemini-3.8-flash', false], ['gemini-3.6-flash', true], ['gemini-flash-latest', true]]);
-    expect(models[0].detail).toContain('HTTP 403');
-    expect(models[0].detail).not.toContain('AIzaSyFAKE123');
+    expect(models.map((m) => [m.model, m.ok])).toEqual([['gemini-3.6-flash', true], ['gemini-3.8-flash', false], ['gemini-flash-latest', true], ['备用 AI（Workers AI）', false]]);
+    expect(models[1].detail).toContain('HTTP 403');
+    expect(models[1].detail).not.toContain('AIzaSyFAKE123');
   });
   it('模型名不存在（404）就换下一个；全都 404 才算出错；回答被 ```json 包住也能读', async () => {
     const ok = { candidates: [{ content: { parts: [{ text: '```json\n{"items":[{"id":"' + POST.id + '","score":70,"reasons":["NBA"]}]}\n```' }] } }] };
     const g = fakeGemini(new Response('no', { status: 404 }), new Response(JSON.stringify(ok), { status: 200 }));
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
-    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 70, reasons: ['NBA'] }] });
-    expect(g.calls.map((c) => c.url.split('/models/')[1].split(':')[0])).toEqual(['gemini-3.8-flash', 'gemini-3.6-flash']);
+    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 70, reasons: ['NBA'] }], engine: 'gemini' });
+    expect(g.calls.map((c) => c.url.split('/models/')[1].split(':')[0])).toEqual(['gemini-3.6-flash', 'gemini-3.8-flash']);
     const all404 = fakeGemini(...[1, 2, 3].map(() => new Response('no', { status: 404 })));
     const r2 = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, all404.fetcher);
     expect(r2.status).toBe(502);
     expect(((await r2.json()) as { detail: string }).detail).toContain('gemini-flash-latest: HTTP 404');
+  });
+});
+
+describe('备用 AI（Workers AI，2026-10-30 Amos 选 A）', () => {
+  const quota = () => [1, 2, 3].map(() => new Response('quota', { status: 429 }));
+  /** Workers AI 替身：按顺序返回给定的结果（Error 就抛出）；记录收到的请求 */
+  function fakeAi(...answers: unknown[]) {
+    const calls: { model: string; input: { messages: { role: string; content: string }[] } }[] = [];
+    return {
+      calls,
+      AI: {
+        run: async (model: string, input: unknown) => {
+          calls.push({ model, input: input as (typeof calls)[number]['input'] });
+          const a = answers.shift();
+          if (a instanceof Error) throw a;
+          return a;
+        },
+      },
+    };
+  }
+  const used = async () => (await db.prepare('SELECT neurons FROM ai_usage').first<{ neurons: number }>())?.neurons ?? 0;
+
+  it('Gemini 都超额时换备用 AI：去掉思考、标出 engine、按 token 记账', async () => {
+    const ai = fakeAi({ response: '<think>想一想</think>\n{"items":[{"id":"' + POST.id + '","score":66,"reasons":["NBA"]}]}', usage: { prompt_tokens: 1000, completion_tokens: 200 } });
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai.AI }), T0, fakeGemini(...quota()).fetcher);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ items: [{ id: POST.id, score: 66, reasons: ['NBA'] }], engine: 'workers-ai' });
+    expect(ai.calls[0].model).toBe('@cf/qwen/qwen3-30b-a3b-fp8');
+    expect(ai.calls[0].input.messages[1].content).toMatch(/\/no_think$/);
+    expect(await used()).toBeCloseTo((1000 * 4625 + 200 * 30475) / 1e6, 5);
+  });
+  it('Gemini 正常时不动备用 AI；新格式（choices）和对象形式的回答也能读', async () => {
+    const ai = fakeAi();
+    const ok = { items: [{ id: POST.id, score: 70, reasons: ['NBA'] }] };
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai.AI }), T0, fakeGemini(ok).fetcher);
+    expect(await r.json()).toEqual({ ...ok, engine: 'gemini' });
+    expect(ai.calls).toHaveLength(0);
+    expect(extractJson('说明文字 {"a":1} 结尾')).toEqual({ a: 1 });
+    const ai2 = fakeAi({ choices: [{ message: { content: { items: [] } } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    const r2 = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai2.AI }), T0, fakeGemini(...quota()).fetcher);
+    expect(r2.status).toBe(200);
+  });
+  it('今天的额度快到上限就不再调用，返回 503 稍后再试（不超出免费额度）', async () => {
+    await db.prepare('INSERT INTO ai_usage (day, neurons) VALUES (?1, ?2)').bind(new Date(T0).toISOString().slice(0, 10), 8000 - RESERVE + 1).run();
+    const ai = fakeAi();
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai.AI }), T0, fakeGemini(...quota()).fetcher);
+    expect(r.status).toBe(503);
+    expect(ai.calls).toHaveLength(0);
+    // 第二天（UTC）重新算
+    const ai2 = fakeAi({ response: '{"items":[]}', usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    expect((await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai2.AI }), T0 + 24 * 3600_000, fakeGemini(...quota()).fetcher)).status).toBe(200);
+  });
+  it('两个都出错 502，原因写两边（不含 Key）；出错的调用也按最多可能用的量记账', async () => {
+    const ai = fakeAi(new Error('upstream exploded'));
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai.AI }), T0, fakeGemini(new Response('bad', { status: 403 })).fetcher);
+    expect(r.status).toBe(502);
+    const j = (await r.json()) as { detail: string };
+    expect(j.detail).toContain('HTTP 403');
+    expect(j.detail).toContain('workers-ai: upstream exploded');
+    expect(await used()).toBe(RESERVE);
+  });
+  it('备用 AI 写的草稿带标记，存进清单后后台也能看到；测试 AI 报备用 AI 和今天用量', async () => {
+    const ai = fakeAi(
+      { response: JSON.stringify({ drafts: [{ tone: '丢问题', text: 'Curry 今晚會先熱手嗎？', source: '' }] }), usage: { prompt_tokens: 100, completion_tokens: 50 } },
+      { response: '{"ok":true}', usage: { prompt_tokens: 10, completion_tokens: 5 } },
+    );
+    const d = (await (await handle(req('POST', '/v1/draft', { product: 'forecast', platform: 'x', post: POST }), env({ AI: ai.AI }), T0, fakeGemini(...quota()).fetcher)).json()) as { drafts: { text: string; engine: string }[]; engine: string };
+    expect(d.engine).toBe('workers-ai');
+    expect(d.drafts[0].engine).toBe('workers-ai');
+    await handle(req('POST', '/v1/queue', { product: 'forecast', platform: 'x', post: POST, score: 80, draft: d.drafts[0].text, source: '', engine: 'workers-ai' }), env(), T0);
+    expect((await db.prepare('SELECT engine FROM queue').first<{ engine: string }>())?.engine).toBe('workers-ai');
+    const diag = (await (await handle(req('GET', '/v1/diag'), env({ AI: ai.AI }), T0, fakeGemini(...quota()).fetcher)).json()) as { models: { model: string; ok: boolean; detail: string }[] };
+    expect(diag.models[3]).toMatchObject({ model: '备用 AI qwen3-30b-a3b-fp8', ok: true });
+    expect(diag.models[3].detail).toMatch(/^OK（今天已用 \d+ \/ 8000）$/);
   });
 });
 

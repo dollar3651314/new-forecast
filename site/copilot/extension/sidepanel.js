@@ -131,7 +131,7 @@ async function loadDrafts() {
   try {
     addLog(`为 ${cur.post.author} 的帖子写草稿…`);
     const r = await api('/v1/draft', { product: cfg.product, platform: cur.platform, post: cur.post });
-    addLog(`草稿：通过检查 ${r.drafts.length} 条，拿掉 ${r.dropped} 条`);
+    addLog(`草稿：通过检查 ${r.drafts.length} 条，拿掉 ${r.dropped} 条${r.engine === 'workers-ai' ? '（备用 AI 写的）' : ''}`);
     cur.drafts = r.drafts;
     cur.pick = 0;
     renderDrafts(r.dropped);
@@ -158,6 +158,7 @@ function renderDrafts(dropped) {
     h.append(Object.assign(document.createElement('span'), { textContent: d.tone }), Object.assign(document.createElement('span'), { textContent: [...d.text].length + ' 字' }));
     el.append(h, Object.assign(document.createElement('p'), { textContent: d.text }));
     if (d.source) el.append(Object.assign(document.createElement('div'), { className: 'src', textContent: '数据来源：' + d.source }));
+    if (d.engine === 'workers-ai') el.append(Object.assign(document.createElement('div'), { className: 'src', textContent: '备用 AI 写的（Gemini 当时用不了），发之前多看一眼' }));
     const choose = () => { cur.pick = i; renderDrafts(dropped); };
     el.addEventListener('click', choose);
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });
@@ -188,7 +189,7 @@ $('save-q').addEventListener('click', async () => {
   b.disabled = true;
   b.textContent = '正在存…';
   try {
-    const r = await api('/v1/queue', { product: cfg.product, platform: cur.platform, post: cur.post, score: cur.score, draft: d.text, source: d.source || '' });
+    const r = await api('/v1/queue', { product: cfg.product, platform: cur.platform, post: cur.post, score: cur.score, draft: d.text, source: d.source || '', engine: d.engine || 'gemini' });
     say(r.saved ? '已存进待回复清单，在后台点"一键回复"就行。' : '这条之前已经在清单里了。', true);
     addLog(`存进清单：${cur.post.author}`);
     chrome.tabs.sendMessage(cur.tabId, { type: 'qc-done', id: cur.post.id, text: '副驾驶：已存进清单' }).catch(() => {});
@@ -303,14 +304,14 @@ async function autoLoop() {
       auto.scored += r.items.length;
       autoView('等打分结果', 'wait');
       chrome.tabs.sendMessage(auto.tabId, { type: 'qc-scores', platform: auto.platform, items: r.items }).catch(() => {});
-      addLog(`自动：打分 ${r.items.map((x) => x.score).join('、')}`);
+      addLog(`自动：打分 ${r.items.map((x) => x.score).join('、')}${r.engine === 'workers-ai' ? '（备用 AI）' : ''}`);
       for (const it of r.items.filter((x) => x.score >= 60)) {
         if (!auto.on) return;
         const post = batch.find((p) => p.id === it.id);
         try {
           const d = await withBusy(() => api('/v1/draft', { product: cfg.product, platform: auto.platform, post }));
           if (!d.drafts.length) { addLog(`自动：${post.author} 没有能用的草稿，跳过`); continue; }
-          const q = await api('/v1/queue', { product: cfg.product, platform: auto.platform, post, score: it.score, draft: d.drafts[0].text, source: d.drafts[0].source || '' });
+          const q = await api('/v1/queue', { product: cfg.product, platform: auto.platform, post, score: it.score, draft: d.drafts[0].text, source: d.drafts[0].source || '', engine: d.drafts[0].engine || 'gemini' });
           if (q.saved) { auto.queued += 1; autoView('等打分结果', 'wait'); chrome.tabs.sendMessage(auto.tabId, { type: 'qc-done', id: post.id, text: '副驾驶：已存进清单' }).catch(() => {}); }
           addLog(`自动：${post.author} 写好草稿，${q.saved ? '已存进清单' : '清单里已经有了'}`);
         } catch (e) { return autoStop('团队出错：' + e.message); }
@@ -360,7 +361,7 @@ $('diag').addEventListener('click', async () => {
       li.textContent = `${m.ok ? '✓' : '✗'} ${m.model}：${(m.ms / 1000).toFixed(1)} 秒，${m.detail}`;
       return li;
     }));
-    addLog('测试 AI：' + r.models.map((m) => `${m.model} ${m.ok ? 'OK' : m.detail} ${(m.ms / 1000).toFixed(1)}s`).join('；'));
+    addLog('测试 AI：' + r.models.map((m) => `${m.model} ${m.detail} ${(m.ms / 1000).toFixed(1)}s`).join('；'));
   } catch (e) {
     $('diag-list').replaceChildren(Object.assign(document.createElement('li'), { className: 'error', textContent: '测试失败：' + e.message }));
   } finally {
