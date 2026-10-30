@@ -346,6 +346,29 @@ $('save').addEventListener('click', async () => {
   }
 });
 
+// 测试 AI（2026-10-30：一直超时 / 忙，看不出是哪个模型的问题）：每个模型的状态和用时
+$('diag').addEventListener('click', async () => {
+  const b = $('diag');
+  b.disabled = true;
+  b.textContent = '正在测试…（最多约 1 分钟）';
+  $('diag-list').replaceChildren();
+  try {
+    const r = await api('/v1/diag');
+    $('diag-list').replaceChildren(...r.models.map((m) => {
+      const li = document.createElement('li');
+      li.className = m.ok ? '' : 'error';
+      li.textContent = `${m.ok ? '✓' : '✗'} ${m.model}：${(m.ms / 1000).toFixed(1)} 秒，${m.detail}`;
+      return li;
+    }));
+    addLog('测试 AI：' + r.models.map((m) => `${m.model} ${m.ok ? 'OK' : m.detail} ${(m.ms / 1000).toFixed(1)}s`).join('；'));
+  } catch (e) {
+    $('diag-list').replaceChildren(Object.assign(document.createElement('li'), { className: 'error', textContent: '测试失败：' + e.message }));
+  } finally {
+    b.disabled = false;
+    b.textContent = '测试 AI（每个模型发一个很小的请求）';
+  }
+});
+
 function switchTab(k) {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
   for (const x of ['auto', 'now', 'today', 'log', 'set']) $('tab-' + x).hidden = x !== k;

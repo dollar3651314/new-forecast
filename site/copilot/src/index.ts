@@ -5,6 +5,7 @@
  * - POST /v1/draft   {product, platform, post}  → {drafts:[{tone, text, source}], dropped}   只给通过程序检查的草稿
  * - POST /v1/log     {product, platform, postId, author?, score?, action: approve|skip|regenerate, draft?}  approve 超过每天上限 → 429
  * - GET  /v1/today   当天（台湾日期）的记录和计数，给插件"今天"页和晚上的小结
+ * - GET  /v1/diag    每个 Gemini 模型发一个很小的请求，报状态和用时（设置页"测试 AI"；不含 Key）
  * - POST /v1/queue   {product, platform, post, score, draft, source}  存进待回复清单（草稿再过一遍程序检查；同一条只存一次）
  * - GET  /           网页后台"待回复清单"（COPILOT_PASSWORD 没填时 404）；接口在 /api/*（queue.ts）
  * 令牌：Authorization: Bearer <COPILOT_TOKEN>（≥ 24 个字符）。COPILOT_TOKEN 或 GEMINI_API_KEY 没填时 /v1/* 全部 404（默认关着，C102）。
@@ -13,7 +14,7 @@
  */
 import { checkDraft, isExcludedTopic, type Platform } from './checks';
 import type { Env } from './env';
-import { askJson, GeminiBusy, GeminiError, type FetchLike } from './gemini';
+import { askJson, diagnose, GeminiBusy, GeminiError, type FetchLike } from './gemini';
 import { FORECAST_RULES } from '../rules/forecast';
 import { ADMIN_PAGE } from './admin-page';
 import { adminApi, adminEnabled, saveToQueue } from './queue';
@@ -199,6 +200,7 @@ export async function handle(req: Request, env: Env, now: number, fetcher?: Fetc
   if (!(await underLimit(env, now))) return json({ error: 'too many requests' }, 429, origin);
   try {
     if (p === '/v1/today' && req.method === 'GET') return await today(env, now, origin!);
+    if (p === '/v1/diag' && req.method === 'GET') return json({ models: await diagnose(env, fetcher) }, 200, origin);
     if (req.method !== 'POST') return notFound();
     if (Number(req.headers.get('content-length') ?? 0) > 32_768) return json({ error: 'too large' }, 413, origin);
     let body: Record<string, unknown>;
