@@ -68,5 +68,19 @@
     return [];
   }
 
-  globalThis.QCParse = { platformOf, readPosts, readX, readThreads, replyUrl, num };
+  /**
+   * 自动模式要立刻停下的页面（agents C136）：登录、验证（机器人检查）、错误、"太频繁"。返回原因，没问题返回 null。
+   * 只看网址和页面上显示的字，不做任何绕过。
+   */
+  function blockedReason(doc, loc) {
+    const path = (loc && loc.pathname) || '';
+    if (/^\/(login|i\/flow|account\/access|accounts\/(login|suspended)|challenge)/i.test(path)) return '需要登录或验证';
+    const text = ((doc.body && doc.body.textContent) || '').slice(0, 5000);
+    if (/rate limit|too many requests|請求過於頻繁|操作太頻繁|稍後再試|try again later/i.test(text)) return '平台提示太频繁';
+    if (/something went wrong|發生錯誤|出了點問題|出错了/i.test(text)) return '平台页面出错';
+    if (/verify you are human|驗證你是真人|unusual activity|異常活動|captcha/i.test(text)) return '平台要求验证';
+    return null;
+  }
+
+  globalThis.QCParse = { platformOf, readPosts, readX, readThreads, replyUrl, num, blockedReason };
 })();

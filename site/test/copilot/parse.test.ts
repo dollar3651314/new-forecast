@@ -12,6 +12,7 @@ const SITE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 
 type Post = { id: string; author: string; text: string; replies: number | null; ageMinutes: number | null };
 type Parse = {
+  blockedReason(d: Document, loc: { pathname: string }): string | null;
   platformOf(h: string): string | null;
   readPosts(d: Document, h: string, now: number): Post[];
   replyUrl(p: string, id: string, t: string): string;
@@ -70,6 +71,19 @@ describe('Threads', () => {
   });
 });
 
+describe('自动模式要停下的页面（C136）', () => {
+  it('登录、验证、太频繁、出错时给出原因；正常页面返回 null', () => {
+    document.body.innerHTML = '<div>首頁</div>';
+    expect(P.blockedReason(document, { pathname: '/home' })).toBeNull();
+    expect(P.blockedReason(document, { pathname: '/i/flow/login' })).toBe('需要登录或验证');
+    expect(P.blockedReason(document, { pathname: '/account/access' })).toBe('需要登录或验证');
+    document.body.innerHTML = '<div>Rate limit exceeded</div>';
+    expect(P.blockedReason(document, { pathname: '/home' })).toBe('平台提示太频繁');
+    document.body.innerHTML = '<div>Something went wrong. Try reloading.</div>';
+    expect(P.blockedReason(document, { pathname: '/home' })).toBe('平台页面出错');
+  });
+});
+
 describe('官方回复窗口和插件权限', () => {
   it('X 用 in_reply_to，Threads 用 reply_post_shortcode；文字编码', () => {
     expect(P.replyUrl('x', '185', '你好 & 再見')).toBe('https://x.com/intent/tweet?in_reply_to=185&text=%E4%BD%A0%E5%A5%BD%20%26%20%E5%86%8D%E8%A6%8B');
@@ -82,7 +96,10 @@ describe('官方回复窗口和插件权限', () => {
     expect(m.host_permissions).toBeUndefined();
     expect(m.content_scripts[0].matches).toEqual(['https://x.com/*', 'https://twitter.com/*', 'https://www.threads.com/*', 'https://www.threads.net/*']);
     const js = ['content.js', 'sidepanel.js', 'parse.js'].map((f) => readFileSync(path.join(SITE_DIR, 'copilot/extension', f), 'utf8')).join('\n');
-    // 不代按按钮、不自动滚动、不碰 Cookie
-    expect(js).not.toMatch(/\.click\(\)|scrollBy|scrollTo|document\.cookie|dispatchEvent/);
+    // 不代按按钮、不碰 Cookie、不模拟输入；只有自动模式的 autoStep 会往下滑（C136）
+    expect(js).not.toMatch(/\.click\(\)|document\.cookie|dispatchEvent|execCommand|scrollTo\(/);
+    const content = readFileSync(path.join(SITE_DIR, 'copilot/extension/content.js'), 'utf8');
+    expect(content.match(/scrollBy/g)).toHaveLength(1);
+    expect(content.slice(content.indexOf('async function autoStep'), content.indexOf('document.addEventListener'))).toContain('scrollBy');
   });
 });

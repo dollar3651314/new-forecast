@@ -2,7 +2,7 @@
  * 副驾驶中转服务（copilot/src）：默认关着、令牌和来源、限流、打分（政治题目兜底）、写稿后的程序检查、每天上限、当天记录。
  * Gemini 用替身（不连外网）；D1 用 Miniflare 的本地 SQLite。
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
@@ -20,15 +20,17 @@ beforeAll(async () => {
   const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: path.join(SITE_DIR, 'test/copilot/wrangler.test.toml'), persist: false, remoteBindings: false, envFiles: [] });
   db = proxy.env.DB;
   dispose = proxy.dispose;
-  const sql = readFileSync(path.join(SITE_DIR, 'copilot/migrations/0001_init.sql'), 'utf8').split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+  const sql = readdirSync(path.join(SITE_DIR, 'copilot/migrations')).filter((f) => f.endsWith('.sql')).sort()
+    .map((f) => readFileSync(path.join(SITE_DIR, 'copilot/migrations', f), 'utf8').split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')).join(';\n');
   await db.batch(sql.split(';').map((s) => s.trim()).filter(Boolean).map((s) => db.prepare(s)));
 });
 afterAll(async () => dispose());
 beforeEach(async () => {
-  await db.batch([db.prepare('DELETE FROM events'), db.prepare('DELETE FROM rate')]);
+  await db.batch(['events', 'rate', 'queue', 'auth_fail', 'auth_lock'].map((t) => db.prepare(`DELETE FROM ${t}`)));
 });
 
-const env = (over: Partial<Env> = {}): Env => ({ DB: db, ENVIRONMENT: 'test', COPILOT_TOKEN: TOKEN, GEMINI_API_KEY: 'ci_only_gemini_key', DAILY_REPLY_CAP: '2', ...over });
+const PASS = 'ci_only_copilot_password_01';
+const env = (over: Partial<Env> = {}): Env => ({ DB: db, ENVIRONMENT: 'test', COPILOT_TOKEN: TOKEN, GEMINI_API_KEY: 'ci_only_gemini_key', COPILOT_PASSWORD: PASS, DAILY_REPLY_CAP: '2', ...over });
 function req(method: string, p: string, body?: unknown, h: Record<string, string> = {}): Request {
   return new Request(`https://copilot.example.test${p}`, {
     method,
@@ -188,5 +190,68 @@ describe('记录、每天上限和当天汇总', () => {
     expect(t).toMatchObject({ day: twDay(T0), cap: 2, approved: 2, skipped: 1 });
     expect(t.day).toBe('2026-10-29');
     expect((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = 'old'").first<{ n: number }>())!.n).toBe(0);
+  });
+});
+
+describe('待回复清单（C136）', () => {
+  const page = (p: string, init: RequestInit & { cookie?: string; ip?: string } = {}) =>
+    new Request(`https://copilot.example.test${p}`, {
+      ...init,
+      headers: { 'content-type': 'application/json', origin: 'https://copilot.example.test', 'cf-connecting-ip': init.ip ?? '203.0.113.9', ...(init.cookie ? { cookie: init.cookie } : {}) },
+    });
+  async function loginCookie(now = T0): Promise<string> {
+    const r = await handle(page('/api/login', { method: 'POST', body: JSON.stringify({ password: PASS }) }), env(), now);
+    expect(r.status).toBe(200);
+    return r.headers.get('set-cookie')!.split(';')[0];
+  }
+  const save = (draft: string, id = POST.id) =>
+    handle(req('POST', '/v1/queue', { product: 'forecast', platform: 'x', post: { ...POST, id }, score: 86, draft, source: 'nba.com' }), env(), T0);
+
+  it('插件存进清单：草稿再查一遍；同一条只存一次；没填后台密码时后台页面和接口 404', async () => {
+    expect(await (await save('Curry 會先熱手嗎？')).json()).toEqual({ saved: true });
+    expect(await (await save('Curry 會先熱手嗎？')).json()).toEqual({ saved: false });
+    expect((await save('來 Quick Come 穩賺')).status).toBe(422);
+    expect((await handle(page('/'), env({ COPILOT_PASSWORD: undefined }), T0)).status).toBe(404);
+    expect((await handle(page('/api/queue'), env({ COPILOT_PASSWORD: 'short' }), T0)).status).toBe(404);
+    const h = await (await handle(new Request('https://c.test/health'), env(), T0)).json();
+    expect(h).toMatchObject({ admin: 'ok' });
+    expect(JSON.stringify(h)).not.toContain(PASS);
+  });
+  it('后台：没登录 401；登录后看到一键回复链接、原帖链接；"我回了"算每天上限；可以放回', async () => {
+    await save('Curry 會先熱手嗎？');
+    await save('勇士主場優勢大嗎？', '1850000000000000009');
+    expect((await handle(page('/api/queue'), env(), T0)).status).toBe(401);
+    const html = await (await handle(page('/'), env(), T0)).text();
+    expect(html).toContain('待回复清单');
+    const ck = await loginCookie();
+    const list = (await (await handle(page('/api/queue?status=pending', { cookie: ck }), env(), T0)).json()) as { items: { id: number; replyUrl: string; postUrl: string; stale: boolean }[]; doneToday: number; cap: number };
+    expect(list.items).toHaveLength(2);
+    expect(list.items[1].replyUrl).toBe(`https://x.com/intent/tweet?in_reply_to=${POST.id}&text=${encodeURIComponent('Curry 會先熱手嗎？')}`);
+    expect(list.items[1].postUrl).toBe(`https://x.com/hoops_demo/status/${POST.id}`);
+    expect(list.items[1].stale).toBe(false);
+    const mark = (id: number, status: string) => handle(page(`/api/queue/${id}`, { method: 'POST', cookie: ck, body: JSON.stringify({ status }) }), env(), T0);
+    expect(await (await mark(list.items[0].id, 'done')).json()).toEqual({ ok: true, doneToday: 1 });
+    expect((await mark(list.items[1].id, 'done')).status).toBe(200);
+    // 上限 2：第 3 条不行
+    await save('第三條', '1850000000000000010');
+    const third = (await (await handle(page('/api/queue', { cookie: ck }), env(), T0)).json()) as { items: { id: number }[] };
+    expect((await mark(third.items[0].id, 'done')).status).toBe(429);
+    expect((await mark(list.items[0].id, 'pending')).status).toBe(200);
+    expect((await mark(999999, 'skip')).status).toBe(404);
+    expect((await mark(list.items[0].id, 'delete')).status).toBe(400);
+    // 别的网站来的写请求 403
+    expect((await handle(new Request(`https://copilot.example.test/api/queue/${list.items[0].id}`, { method: 'POST', headers: { origin: 'https://evil.example', cookie: ck }, body: '{"status":"skip"}' }), env(), T0)).status).toBe(403);
+    // 会话 12 小时过期；改密码旧会话失效
+    expect((await handle(page('/api/queue', { cookie: ck }), env(), T0 + 12 * 3600_000 + 1)).status).toBe(401);
+    expect((await handle(page('/api/queue', { cookie: ck }), env({ COPILOT_PASSWORD: 'another_password_123456' }), T0)).status).toBe(401);
+  });
+  it('登录：同一 IP 错 5 次锁 15 分钟（锁着时正确密码也不行）；失败一律同一句', async () => {
+    const tryPw = (pw: string, now = T0, ip = '198.51.100.7') => handle(page('/api/login', { method: 'POST', ip, body: JSON.stringify({ password: pw }) }), env(), now);
+    for (let i = 0; i < 5; i++) expect(await (await tryPw('wrong')).json()).toEqual({ error: '登录失败，请稍后再试' });
+    const locked = await tryPw(PASS);
+    expect(locked.status).toBe(401);
+    expect(await locked.json()).toEqual({ error: '登录失败，请稍后再试' });
+    expect((await tryPw(PASS, T0, '198.51.100.8')).status).toBe(200);
+    expect((await tryPw(PASS, T0 + 15 * 60_000 + 1)).status).toBe(200);
   });
 });
