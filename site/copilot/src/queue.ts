@@ -1,15 +1,19 @@
 /**
- * 待回复清单（agents C136）：插件存进来，Amos 在网页后台点"一键回复"→ 官方回复窗口 → 本人按发送 → 回来点"我回了"。
- * - 插件用（令牌）：POST /v1/queue {product, platform, post:{id, author, text, ageMinutes}, score, draft, source}；同一条帖子只存一次。
- * - 后台用（密码登录后的会话 Cookie）：GET /api/queue?status=pending|done|skip、POST /api/queue/<id> {status}、POST /api/login、POST /api/logout。
+ * 跟帖评论清单（原"待回复清单"，agents C136；0.3 改名）：插件存进来，Amos 在网页后台点"一键回复"→ 官方回复窗口 → 本人按发送 → 回来点"我回了"。
+ * - 插件用（令牌）：POST /v1/queue {product, platform, post:{id, author, text, ageMinutes}, score, reasons, draft, source}；同一条帖子只存一次。
+ * - 后台用（密码登录后的会话 Cookie）：
+ *   GET /api/queue?status=pending|done|skip&product=&platform=&from=YYYY-MM-DD&to=YYYY-MM-DD（按存进来的台湾日期）、POST /api/queue/<id> {status}、
+ *   POST /api/queue/delete {ids}（Amos 自己删；记录不自动删，D-4 选 B）、GET /api/usage、POST /api/usage {caps}（用量和限额，usage.ts）、POST /api/login、POST /api/logout。
  * 登录：密钥 COPILOT_PASSWORD（≥ 16 个字符，没填时后台 404）；同一 IP 15 分钟错 5 次锁 15 分钟，全站 1 小时错 20 次锁 1 小时；
  * 失败一律回答同一句（不透露锁定规则，C128）；会话 12 小时，签名密钥由密码派生，改密码旧会话全部失效。
  */
 import type { Env } from './env';
+import { modelList } from './gemini';
+import { saveCaps, usageReport, WAI_KEY } from './usage';
+import { usedToday } from './workers-ai';
 
 export const SESSION_MS = 12 * 3600_000;
 const LOCK = { ipWindow: 15 * 60_000, ipMax: 5, ipLock: 15 * 60_000, allWindow: 3600_000, allMax: 20, allLock: 3600_000 };
-const KEEP_MS = 30 * 24 * 3600_000;
 const TW_MS = 8 * 3600_000;
 const twDay = (now: number) => new Date(now + TW_MS).toISOString().slice(0, 10);
 const COOKIE = 'qc_cp';
@@ -102,14 +106,55 @@ export async function adminApi(env: Env, req: Request, now: number): Promise<Res
   if (p === '/api/logout' && req.method === 'POST') return json({ ok: true }, 200, { 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0` });
   if (!(await sessionOk(env, req, now))) return json({ error: '请重新登录' }, 401);
   if (p === '/api/queue' && req.method === 'GET') {
-    const status = ['pending', 'done', 'skip'].includes(url.searchParams.get('status') ?? '') ? url.searchParams.get('status')! : 'pending';
-    const r = await env.DB.prepare(`SELECT id, at, platform, post_id, author, snippet, post_at, score, draft, source, engine, status FROM queue WHERE status = ?1 ORDER BY ${status === 'pending' ? 'at DESC' : 'updated_at DESC'} LIMIT 200`).bind(status).all<{ id: number; at: number; platform: 'x' | 'threads'; post_id: string; author: string; snippet: string; post_at: number | null; score: number | null; draft: string; source: string; engine: string; status: string }>();
+    const q = url.searchParams;
+    const status = ['pending', 'done', 'skip'].includes(q.get('status') ?? '') ? q.get('status')! : 'pending';
+    const where = ['status = ?1'];
+    const args: (string | number)[] = [status];
+    const add = (sql: string, v: string | number) => { args.push(v); where.push(sql.replace('?', '?' + args.length)); };
+    if (/^[a-z0-9-]{1,32}$/.test(q.get('product') ?? '')) add('product = ?', q.get('product')!);
+    if (q.get('platform') === 'x' || q.get('platform') === 'threads') add('platform = ?', q.get('platform')!);
+    const day = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? Date.parse(`${v}T00:00:00+08:00`) : NaN);
+    if (Number.isFinite(day(q.get('from')))) add('at >= ?', day(q.get('from')));
+    if (Number.isFinite(day(q.get('to')))) add('at < ?', day(q.get('to')) + 24 * 3600_000);
+    const cond = where.join(' AND ');
+    const [r, total, products] = await Promise.all([
+      env.DB.prepare(`SELECT id, at, updated_at, product, platform, post_id, author, snippet, post_at, score, reasons, draft, source, engine, status FROM queue WHERE ${cond} ORDER BY ${status === 'pending' ? 'at DESC' : 'updated_at DESC'} LIMIT ${LIST_MAX}`).bind(...args)
+        .all<{ id: number; at: number; updated_at: number; product: string; platform: 'x' | 'threads'; post_id: string; author: string; snippet: string; post_at: number | null; score: number | null; reasons: string; draft: string; source: string; engine: string; status: string }>(),
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM queue WHERE ${cond}`).bind(...args).first<{ n: number }>(),
+      env.DB.prepare('SELECT DISTINCT product FROM queue ORDER BY product').all<{ product: string }>(),
+    ]);
     const items = (r.results ?? []).map((x) => ({
-      id: x.id, platform: x.platform, author: x.author, snippet: x.snippet, score: x.score, draft: x.draft, source: x.source, engine: x.engine, status: x.status, savedAt: x.at,
+      id: x.id, product: x.product, platform: x.platform, author: x.author, snippet: x.snippet, score: x.score, reasons: readReasons(x.reasons),
+      draft: x.draft, source: x.source, engine: x.engine, status: x.status,
+      savedAt: x.at, postAt: x.post_at, handledAt: x.status === 'pending' ? null : x.updated_at,
       stale: (x.post_at ?? x.at) < now - 24 * 3600_000,
       replyUrl: replyUrl(x.platform, x.post_id, x.draft), postUrl: postUrl(x.platform, x.post_id, x.author),
     }));
-    return json({ items, doneToday: await doneToday(env, now), cap: cap(env) });
+    return json({ items, total: total?.n ?? 0, max: LIST_MAX, products: (products.results ?? []).map((x) => x.product), doneToday: await doneToday(env, now), cap: cap(env) });
+  }
+  if (p === '/api/queue/delete' && req.method === 'POST') {
+    // Amos 自己删（D-4：记录一直保留，条数太多时自己删）；一次最多 LIST_MAX 条，删了不能恢复（页面上先确认）
+    let ids: number[] = [];
+    try { ids = ((await req.json()) as { ids?: unknown }).ids as number[]; } catch { /* 下面判 400 */ }
+    if (!Array.isArray(ids) || !ids.length || ids.length > LIST_MAX || !ids.every((n) => Number.isInteger(n) && n > 0)) return json({ error: '请求不对' }, 400);
+    // D1 每条语句最多 100 个参数：每 100 个一批，一起提交
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+    const rs = await env.DB.batch(chunks.map((c) => env.DB.prepare(`DELETE FROM queue WHERE id IN (${c.map((_, i) => '?' + (i + 1)).join(',')})`).bind(...c)));
+    const deleted = rs.reduce((n, r) => n + (r.meta.changes ?? 0), 0);
+    console.log(JSON.stringify({ event: 'copilot.queue_deleted', n: deleted }));
+    return json({ ok: true, deleted });
+  }
+  if (p === '/api/usage' && req.method === 'GET') {
+    return json({ rows: await usageReport(env, now, modelList(env), await usedToday(env, now), !!env.AI) });
+  }
+  if (p === '/api/usage' && req.method === 'POST') {
+    let caps: Record<string, unknown> = {};
+    try { caps = ((await req.json()) as { caps?: Record<string, unknown> }).caps ?? {}; } catch { /* 下面判 400 */ }
+    if (!caps || typeof caps !== 'object' || Array.isArray(caps)) return json({ error: '请求不对' }, 400);
+    const bad = await saveCaps(env, now, caps, [...modelList(env), WAI_KEY]);
+    if (bad.length) return json({ error: '没保存：' + bad.join('；') }, 400);
+    return json({ ok: true, rows: await usageReport(env, now, modelList(env), await usedToday(env, now), !!env.AI) });
   }
   const m = p.match(/^\/api\/queue\/(\d{1,10})$/);
   if (m && req.method === 'POST') {
@@ -124,13 +169,23 @@ export async function adminApi(env: Env, req: Request, now: number): Promise<Res
   return new Response('Not found', { status: 404 });
 }
 
-/** 插件存一条进清单（调用方已经核对过令牌和来源）；同一条帖子只存一次 */
-export async function saveToQueue(env: Env, now: number, q: { product: string; platform: 'x' | 'threads'; postId: string; author: string; text: string; ageMinutes: number | null; score: number | null; draft: string; source: string; engine?: string }): Promise<{ saved: boolean }> {
+const LIST_MAX = 500;
+function readReasons(s: string): string[] {
+  try {
+    const a = JSON.parse(s);
+    return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string').slice(0, 3) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 插件存一条进清单（调用方已经核对过令牌和来源）；同一条帖子只存一次；记录一直保留（D-4 选 B，Amos 在后台自己删） */
+export async function saveToQueue(env: Env, now: number, q: { product: string; platform: 'x' | 'threads'; postId: string; author: string; text: string; ageMinutes: number | null; score: number | null; reasons?: string[]; draft: string; source: string; engine?: string }): Promise<{ saved: boolean }> {
+  const reasons = JSON.stringify((q.reasons ?? []).slice(0, 3).map((r) => r.slice(0, 60)));
   const r = await env.DB.prepare(
-    'INSERT INTO queue (at, updated_at, product, platform, post_id, author, snippet, post_at, score, draft, source, engine) VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT (platform, post_id) DO NOTHING',
+    'INSERT INTO queue (at, updated_at, product, platform, post_id, author, snippet, post_at, score, reasons, draft, source, engine) VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (platform, post_id) DO NOTHING',
   )
-    .bind(now, q.product, q.platform, q.postId, q.author, q.text.slice(0, 280), q.ageMinutes == null ? null : now - q.ageMinutes * 60_000, q.score, q.draft.slice(0, 600), q.source.slice(0, 120), q.engine === 'workers-ai' ? 'workers-ai' : 'gemini')
+    .bind(now, q.product, q.platform, q.postId, q.author, q.text.slice(0, 280), q.ageMinutes == null ? null : now - q.ageMinutes * 60_000, q.score, reasons, q.draft.slice(0, 600), q.source.slice(0, 120), q.engine === 'workers-ai' ? 'workers-ai' : 'gemini')
     .run();
-  await env.DB.prepare("DELETE FROM queue WHERE at < ?1 AND status != 'pending'").bind(now - KEEP_MS).run();
   return { saved: r.meta.changes === 1 };
 }

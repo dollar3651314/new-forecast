@@ -15,7 +15,7 @@
    - `GEMINI_API_KEY`：在 Google AI Studio（aistudio.google.com）→ Get API key → 为副驾驶**单独建一个** Key。
    - `COPILOT_TOKEN`：自己编一串至少 24 个字符的随机字母数字（只给插件用）。
 2. 打开 `https://quickcome-copilot.<你的子域>.workers.dev/health`，看到 `"copilot":"ok"` 就开通了（没填时是 `not_configured`，插件的请求一律 404）。
-3. **待回复清单（网页后台）**：再加一个 Secret `COPILOT_PASSWORD`（自己编，至少 16 个字符，和 `COPILOT_TOKEN` 不同）。打开 `https://quickcome-copilot.<你的子域>.workers.dev/` 用这个密码登录；手机也能打开。
+3. **跟帖评论清单（网页后台，原"待回复清单"；还有"用量和限额"页，可设每个模型每天的上限）**：再加一个 Secret `COPILOT_PASSWORD`（自己编，至少 16 个字符，和 `COPILOT_TOKEN` 不同）。打开 `https://quickcome-copilot.<你的子域>.workers.dev/` 用这个密码登录；手机也能打开。
 4. 备用 AI（Workers AI）不用填任何东西：部署时自动绑定官网的 Cloudflare 账号，Gemini 都用不了时才用，每天用到 8,000 neurons 就停（免费额度 10,000）。插件设置页"测试 AI"最后一行就是它。
 5. 可选：插件装好后，把插件 ID 填成变量 `ALLOWED_ORIGIN = chrome-extension://<插件 ID>`，只让你这一个插件连。
 

@@ -6,8 +6,8 @@
  * - POST /v1/log     {product, platform, postId, author?, score?, action: approve|skip|regenerate, draft?}  approve 超过每天上限 → 429
  * - GET  /v1/today   当天（台湾日期）的记录和计数，给插件"今天"页和晚上的小结
  * - GET  /v1/diag    每个 Gemini 模型和备用 AI 各发一个很小的请求，报状态和用时（设置页"测试 AI"；不含 Key）
- * - POST /v1/queue   {product, platform, post, score, draft, source}  存进待回复清单（草稿再过一遍程序检查；同一条只存一次）
- * - GET  /           网页后台"待回复清单"（COPILOT_PASSWORD 没填时 404）；接口在 /api/*（queue.ts）
+ * - POST /v1/queue   {product, platform, post, score, reasons, draft, source}  存进跟帖评论清单（草稿再过一遍程序检查；同一条只存一次）
+ * - GET  /           网页后台"跟帖评论清单"和"用量和限额"（COPILOT_PASSWORD 没填时 404）；接口在 /api/*（queue.ts、usage.ts）
  * 令牌：Authorization: Bearer <COPILOT_TOKEN>（≥ 24 个字符）。COPILOT_TOKEN 或 GEMINI_API_KEY 没填时 /v1/* 全部 404（默认关着，C102）。
  * Gemini 都用不了时换备用 AI（Workers AI，ai.ts）；草稿带 engine 标出是哪个 AI 写的。
  * Gemini 超额（429）返回 503 + retryAfter，插件自动排队再试；其他 Gemini 错误返回 502 + detail（原因，不含 Key）。
@@ -23,7 +23,6 @@ import { adminApi, adminEnabled, doneToday, saveToQueue } from './queue';
 
 const RULES: Record<string, string> = { forecast: FORECAST_RULES };
 const PER_MINUTE = 30;
-const KEEP_MS = 30 * 24 * 3600_000;
 const TW_MS = 8 * 3600_000;
 
 export function twDay(now: number): string {
@@ -83,12 +82,10 @@ function readPost(v: unknown): PostIn | null {
 }
 
 async function logEvent(env: Env, now: number, e: { product: string; platform: string; postId: string; author?: string; snippet?: string; score?: number | null; action: string; draft?: string }) {
-  await env.DB.batch([
-    env.DB.prepare('INSERT INTO events (at, day, product, platform, post_id, author, snippet, score, action, draft) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)').bind(
-      now, twDay(now), e.product, e.platform, e.postId, e.author ?? '', (e.snippet ?? '').slice(0, 120), e.score ?? null, e.action, (e.draft ?? '').slice(0, 600),
-    ),
-    env.DB.prepare('DELETE FROM events WHERE at < ?1').bind(now - KEEP_MS),
-  ]);
+  // 记录一直保留（D-4 选 B）
+  await env.DB.prepare('INSERT INTO events (at, day, product, platform, post_id, author, snippet, score, action, draft) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)')
+    .bind(now, twDay(now), e.product, e.platform, e.postId, e.author ?? '', (e.snippet ?? '').slice(0, 120), e.score ?? null, e.action, (e.draft ?? '').slice(0, 600))
+    .run();
 }
 
 async function score(env: Env, body: Record<string, unknown>, now: number, origin: string, fetcher?: FetchLike): Promise<Response> {
@@ -175,12 +172,12 @@ async function queue(env: Env, body: Record<string, unknown>, now: number, origi
   const why = checkDraft(draft, platform, post.text);
   if (why.length) return json({ error: 'draft rejected', why }, 422, origin);
   const sc = typeof body.score === 'number' ? Math.max(0, Math.min(100, Math.round(body.score))) : null;
-  const r = await saveToQueue(env, now, { product, platform, postId: post.id, author: post.author, text: post.text, ageMinutes: post.ageMinutes, score: sc, draft, source: str(body.source, 120), engine: body.engine === 'workers-ai' ? 'workers-ai' : 'gemini' });
+  const r = await saveToQueue(env, now, { product, platform, postId: post.id, author: post.author, text: post.text, ageMinutes: post.ageMinutes, score: sc, reasons: Array.isArray(body.reasons) ? body.reasons.filter((r): r is string => typeof r === 'string').map((r) => r.trim()).filter(Boolean) : [], draft, source: str(body.source, 120), engine: body.engine === 'workers-ai' ? 'workers-ai' : 'gemini' });
   return json(r, 200, origin);
 }
 
 /**
- * 当天（台湾日期）的记录：插件里的"同意 / 跳过"，加上待回复清单里今天"进清单 / 我回了 / 跳过"的
+ * 当天（台湾日期）的记录：插件里的"同意 / 跳过"，加上跟帖评论清单里今天"进清单 / 我回了 / 跳过"的
  * （2026-10-30 Amos：在后台清单里回了 2 条，"今天"却是空的——原来只算插件里按"同意"的）
  */
 async function today(env: Env, now: number, origin: string): Promise<Response> {

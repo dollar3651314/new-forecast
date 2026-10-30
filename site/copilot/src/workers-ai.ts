@@ -1,12 +1,13 @@
 /**
  * 备用 AI：Cloudflare Workers AI（Amos 2026-10-30 选 A）。Gemini 每个模型都超额、超时或出错时才用。
  * - 不用新密钥：wrangler.toml 里的 [ai] 绑定直接用官网所在的 Cloudflare 账号（C132）。
- * - 免费额度每天 10,000 neurons（UTC 0 点重置）；这里按每次回答的 token 数记账，当天到 WORKERS_AI_DAILY_NEURONS（默认 8,000）就停，
+ * - 免费额度每天 10,000 neurons（UTC 0 点重置）；这里按每次回答的 token 数记账，当天到上限（后台设，默认 8,000，最多 9,500，usage.ts）就停，
  *   不会超出免费额度产生费用（C117）。每次调用前先留出一次最多可能用的量（RESERVE）。
  * - 模型：Qwen3 30B（中文可以、单价最低）；它默认会先"思考"，提示词末尾加 /no_think，回答里的 <think>…</think> 去掉再解析。
  */
 import type { Env } from './env';
 import { parseLoose } from './gemini';
+import { getCap, recordUse, WAI_KEY } from './usage';
 
 export const WAI_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
 /** 每百万 token 的 neurons（Cloudflare 价格页，2026-10-30） */
@@ -15,7 +16,6 @@ const OUT_PER_M = 30_475;
 const MAX_OUT = 2_000;
 /** 一次最多可能用的 neurons：输入按 8,000 token、输出按 MAX_OUT 算，约 98 */
 export const RESERVE = Math.ceil((8_000 * IN_PER_M + MAX_OUT * OUT_PER_M) / 1e6);
-export const DEFAULT_DAILY_NEURONS = 8_000;
 
 export class WorkersAiError extends Error {}
 /** 今天的额度到上限了 */
@@ -27,10 +27,8 @@ export interface AiLike {
 
 const utcDay = (now: number) => new Date(now).toISOString().slice(0, 10);
 
-export function dailyCap(env: Env): number {
-  const n = Number(env.WORKERS_AI_DAILY_NEURONS);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, 9_500) : DEFAULT_DAILY_NEURONS;
-}
+/** 每天上限：后台"用量和限额"页设的值，没设时用 WORKERS_AI_DAILY_NEURONS，最多 9500（usage.ts） */
+export const dailyCap = (env: Env): Promise<number> => getCap(env, WAI_KEY);
 
 export async function usedToday(env: Env, now: number): Promise<number> {
   const r = await env.DB.prepare('SELECT neurons FROM ai_usage WHERE day = ?1').bind(utcDay(now)).first<{ neurons: number }>();
@@ -38,10 +36,8 @@ export async function usedToday(env: Env, now: number): Promise<number> {
 }
 
 async function addUsage(env: Env, now: number, neurons: number) {
-  await env.DB.batch([
-    env.DB.prepare('INSERT INTO ai_usage (day, neurons) VALUES (?1, ?2) ON CONFLICT (day) DO UPDATE SET neurons = neurons + ?2').bind(utcDay(now), neurons),
-    env.DB.prepare('DELETE FROM ai_usage WHERE day < ?1').bind(utcDay(now - 30 * 24 * 3600_000)),
-  ]);
+  // 记录一直保留（D-4 选 B）
+  await env.DB.prepare('INSERT INTO ai_usage (day, neurons) VALUES (?1, ?2) ON CONFLICT (day) DO UPDATE SET neurons = neurons + ?2').bind(utcDay(now), neurons).run();
 }
 
 /** 从回答里取出文字和 token 数（新旧两种回答格式都认） */
@@ -74,7 +70,7 @@ export function extractJson(text: string): unknown {
 export async function askWorkersAi(env: Env, system: string, user: string, now: number): Promise<unknown> {
   const ai = env.AI as AiLike | undefined;
   if (!ai) throw new WorkersAiError('Workers AI 没有绑定');
-  const cap = dailyCap(env);
+  const cap = await dailyCap(env);
   if ((await usedToday(env, now)) + RESERVE > cap) throw new WorkersAiCap(`Workers AI 今天用到 ${cap} 上限（台湾早上 8 点重置）`);
   let r: unknown;
   try {
@@ -88,6 +84,7 @@ export async function askWorkersAi(env: Env, system: string, user: string, now: 
   } catch (e) {
     // 失败的调用不一定计费，但保守起见按一次最多可能用的量记账
     await addUsage(env, now, RESERVE);
+    await recordUse(env, WAI_KEY, now, { status: 0 });
     throw new WorkersAiError(`Workers AI 出错：${String((e as Error)?.message ?? e).replace(/\s+/g, ' ').slice(0, 120)}`);
   }
   const { text, inTok, outTok } = readResult(r);
@@ -95,5 +92,6 @@ export async function askWorkersAi(env: Env, system: string, user: string, now: 
   const inT = inTok ?? [...system].length + [...user].length;
   const outT = outTok ?? [...text].length;
   await addUsage(env, now, (inT * IN_PER_M + outT * OUT_PER_M) / 1e6);
+  await recordUse(env, WAI_KEY, now, { status: 200, tokIn: inT, tokOut: outT });
   return extractJson(text);
 }

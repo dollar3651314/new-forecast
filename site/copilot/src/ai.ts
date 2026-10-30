@@ -12,7 +12,7 @@ export type Engine = 'gemini' | 'workers-ai';
 export async function ask(env: Env, system: string, user: string, now: number, fetcher?: FetchLike): Promise<{ data: unknown; engine: Engine }> {
   let first: Error;
   try {
-    return { data: await askGemini(env, system, user, fetcher), engine: 'gemini' };
+    return { data: await askGemini(env, system, user, fetcher, now), engine: 'gemini' };
   } catch (e) {
     if (!(e instanceof GeminiBusy || e instanceof GeminiError)) throw e;
     first = e;
@@ -30,12 +30,12 @@ export async function ask(env: Env, system: string, user: string, now: number, f
 
 /** 设置页"测试 AI"：每个 Gemini 模型一行，再加备用 AI 一行（带今天用了多少额度） */
 export async function diagnose(env: Env, now: number, fetcher?: FetchLike): Promise<{ model: string; ok: boolean; ms: number; detail: string }[]> {
-  const out = await diagnoseGemini(env, fetcher);
+  const out = await diagnoseGemini(env, fetcher, now);
   if (!env.AI) return [...out, { model: '备用 AI（Workers AI）', ok: false, ms: 0, detail: '没有绑定' }];
   const t0 = Date.now();
   try {
     await askWorkersAi(env, '只回答 JSON。', '回答 {"ok":true}', now);
-    out.push({ model: `备用 AI ${WAI_MODEL.split('/').pop()}`, ok: true, ms: Date.now() - t0, detail: `OK（今天已用 ${Math.round(await usedToday(env, now))} / ${dailyCap(env)}）` });
+    out.push({ model: `备用 AI ${WAI_MODEL.split('/').pop()}`, ok: true, ms: Date.now() - t0, detail: `OK（今天已用 ${Math.round(await usedToday(env, now))} / ${await dailyCap(env)}）` });
   } catch (e) {
     out.push({ model: `备用 AI ${WAI_MODEL.split('/').pop()}`, ok: false, ms: Date.now() - t0, detail: (e as Error).message });
   }

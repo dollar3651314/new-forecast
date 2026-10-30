@@ -7,6 +7,7 @@
  * - 其他错误抛 GeminiError，detail 只写状态码或"不是 JSON"这类原因，不含 Key（2026-10-29 Amos 测试版报错时看不出原因，加上）。
  */
 import type { Env } from './env';
+import { getCap, recordUse, usedReq } from './usage';
 
 export class GeminiError extends Error {}
 export class GeminiBusy extends Error {}
@@ -46,8 +47,15 @@ async function callModel(env: Env, model: string, system: string, user: string, 
   }
 }
 
+type GeminiBody = { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number } };
+/** 记一次 Gemini 请求：状态和 token（回答里的 usageMetadata；思考用的 token 算在输出里） */
+async function record(env: Env, model: string, now: number, status: number, body?: GeminiBody) {
+  const u = body?.usageMetadata;
+  await recordUse(env, model, now, { status, tokIn: u?.promptTokenCount, tokOut: (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0) });
+}
+
 /** 诊断：每个模型发一个很小的请求，报状态和用时（设置页"测试 AI"，不含 Key） */
-export async function diagnose(env: Env, fetcher: FetchLike = fetch): Promise<{ model: string; ok: boolean; ms: number; detail: string }[]> {
+export async function diagnose(env: Env, fetcher: FetchLike = fetch, now = Date.now()): Promise<{ model: string; ok: boolean; ms: number; detail: string }[]> {
   const out = [];
   for (const model of modelList(env)) {
     const t0 = Date.now();
@@ -55,8 +63,12 @@ export async function diagnose(env: Env, fetcher: FetchLike = fetch): Promise<{ 
       let res = await callModel(env, model, '只回答 JSON。', '回答 {"ok":true}', true, fetcher);
       if (res.status === 400) res = await callModel(env, model, '只回答 JSON。', '回答 {"ok":true}', false, fetcher);
       const body = res.ok ? await res.text() : (await res.text()).slice(0, 200);
+      let parsed: GeminiBody | undefined;
+      try { parsed = res.ok ? (JSON.parse(body) as GeminiBody) : undefined; } catch { /* 只是拿不到 token 数 */ }
+      await record(env, model, now, res.status, parsed);
       out.push({ model, ok: res.ok, ms: Date.now() - t0, detail: res.ok ? 'OK' : `HTTP ${res.status} ${body.replace(/\s+/g, ' ').replace(/AIza[0-9A-Za-z_-]+/g, '***').slice(0, 160)}` });
     } catch (e) {
+      await record(env, model, now, 0);
       out.push({ model, ok: false, ms: Date.now() - t0, detail: (e as Error).message });
     }
   }
@@ -67,10 +79,17 @@ export async function diagnose(env: Env, fetcher: FetchLike = fetch): Promise<{ 
  * 每个模型失败的原因用中文写进 tried（2026-10-30 Amos：到上限时要说清楚是哪个模型、什么原因，不要只说"团队忙"）。
  * 全都超额 → GeminiBusy；其他 → GeminiError；message 是每个模型的原因（不含 Key）。
  */
-export async function askJson(env: Env, system: string, user: string, fetcher: FetchLike = fetch): Promise<unknown> {
+export async function askJson(env: Env, system: string, user: string, fetcher: FetchLike = fetch, now = Date.now()): Promise<unknown> {
   const tried: string[] = [];
   let busy = false;
   for (const model of modelList(env)) {
+    // 到了 Amos 在后台设的每天上限（0.3，D-3）：今天先跳过这个模型
+    const cap = await getCap(env, model);
+    if ((await usedReq(env, model, now)) >= cap) {
+      busy = true;
+      tried.push(`${model} 到了我们设的上限（每天 ${cap} 次）`);
+      continue;
+    }
     const call = (lowThinking: boolean) => callModel(env, model, system, user, lowThinking, fetcher);
     let res: Response;
     try {
@@ -78,9 +97,11 @@ export async function askJson(env: Env, system: string, user: string, fetcher: F
       if (res.status === 400) res = await call(false);
     } catch (e) {
       // 超时、网络出错：换下一个模型
+      await record(env, model, now, 0);
       tried.push(`${model} ${(e as Error).message}`);
       continue;
     }
+    if (!res.ok) await record(env, model, now, res.status);
     if (res.status === 404) {
       tried.push(`${model} 这个 Key 用不了（404）`);
       continue;
@@ -96,7 +117,8 @@ export async function askJson(env: Env, system: string, user: string, fetcher: F
       continue;
     }
     if (!res.ok) throw new GeminiError([...tried, `${model} 出错（HTTP ${res.status}）`].join('；'));
-    const body = (await res.json()) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+    const body = (await res.json()) as GeminiBody;
+    await record(env, model, now, res.status, body);
     const text = body.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
     try {
       return parseLoose(text);
