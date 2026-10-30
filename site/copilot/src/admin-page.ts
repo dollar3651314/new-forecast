@@ -77,7 +77,8 @@ th{font-size:12px;color:var(--muted);font-weight:600}td.n{text-align:right}
   </section>
   <section id="v-usage" hidden>
     <div class="card"><div class="tablewrap"><table><thead><tr><th>模型</th><th>今天请求</th><th>今天 token（入 / 出）</th><th>每天上限</th><th>用量</th><th>状态</th><th>下次重置（台湾时间）</th></tr></thead><tbody id="u-rows"></tbody></table></div>
-      <div class="pad"><button class="btn primary" id="u-save" type="button">保存上限</button><p class="msg" id="u-msg" role="status"></p>
+      <div class="pad"><p class="sum" style="margin:0"><span id="u-at">还没读取</span><span class="sp"></span><button class="btn small" id="u-refresh" type="button">立即刷新</button></p>
+        <button class="btn primary" id="u-save" type="button">保存上限</button><p class="msg" id="u-msg" role="status"></p>
         <p class="hint">Gemini 的真实免费额度 Google 不提供查询，这里是我们自己数的次数和 token；Google 说用完（429）时状态会标出来。到了我们设的上限，这个模型今天先跳过，换下一个。Gemini 按次数（1～10,000），Workers AI 按 neurons（1～9,500；免费额度 10,000，超过不让保存）。"今天"按各家的重置时间算。</p></div></div>
   </section>
 </main>
@@ -94,7 +95,7 @@ function showApp(){$('app').hidden=false;$('logout').hidden=false;$('nav').hidde
 $('login').addEventListener('submit',async(e)=>{e.preventDefault();const b=$('go');b.disabled=true;b.textContent='正在登录…';$('lmsg').textContent='';
   try{await call('/api/login',{password:$('pw').value});$('pw').value='';$('login').hidden=true;await load();}catch(err){$('lmsg').textContent=err.message;}finally{b.disabled=false;b.textContent='登录';}});
 $('logout').addEventListener('click',async()=>{await call('/api/logout',{}).catch(()=>{});showLogin('已登出');});
-$('nav').addEventListener('click',()=>{view=view==='list'?'usage':'list';$('v-list').hidden=view!=='list';$('v-usage').hidden=view!=='usage';$('title').textContent=view==='list'?'跟帖评论清单':'用量和限额';$('nav').textContent=view==='list'?'用量和限额 →':'← 跟帖评论清单';document.title=$('title').textContent;if(view==='usage')loadUsage();else load();});
+$('nav').addEventListener('click',()=>{view=view==='list'?'usage':'list';$('v-list').hidden=view!=='list';$('v-usage').hidden=view!=='usage';$('title').textContent=view==='list'?'跟帖评论清单':'用量和限额';$('nav').textContent=view==='list'?'用量和限额 →':'← 跟帖评论清单';document.title=$('title').textContent;usageTimer(view==='usage');if(view==='usage'){uEditing=false;loadUsage(true);}else load();});
 document.querySelectorAll('[data-f]').forEach(b=>b.addEventListener('click',()=>{filter=b.dataset.f;document.querySelectorAll('[data-f]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));toast('');load();}));
 function setRange(rg){document.querySelectorAll('[data-rg]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.rg===rg)));const t=twDay(Date.now());
   if(rg==='today'){$('f-from').value=t;$('f-to').value=t;}else if(rg==='7'){$('f-from').value=twDay(Date.now()-6*864e5);$('f-to').value=t;}else{$('f-from').value='';$('f-to').value='';}load();}
@@ -164,7 +165,16 @@ $('bulk-no').addEventListener('click',()=>{$('bulk-confirm').hidden=true;});
 $('bulk-yes').addEventListener('click',async()=>{const y=$('bulk-yes');y.disabled=true;y.textContent='正在删除…';$('bulk-no').disabled=true;
   try{const r=await call('/api/queue/delete',{ids:state.items.map(x=>x.id)});toast('已删除 '+r.deleted+' 条');await load();}catch(e){toast('没删掉：'+e.message,true);}
   finally{y.disabled=false;y.textContent='确认删除';$('bulk-no').disabled=false;}});
-async function loadUsage(){$('u-msg').textContent='';try{usage=(await call('/api/usage')).rows;}catch(e){$('u-msg').className='msg';$('u-msg').textContent=e.message;return;}renderUsage();}
+// 用量页：打开时读一次；停在这一页时每 30 秒自动刷新（0.3.5，B-2）；输入框正在改时不覆盖
+let uTimer=null, uEditing=false;
+function uStamp(){$('u-at').textContent='更新于 '+tw(Date.now()).slice(11)+'（停在这一页时每 30 秒自动刷新）';}
+async function loadUsage(manual){const b=$('u-refresh');if(manual){b.disabled=true;b.textContent='正在刷新…';}
+  try{const rows=(await call('/api/usage')).rows;if(!uEditing||manual){usage=rows;renderUsage();}uStamp();if(manual)$('u-msg').textContent='';}
+  catch(e){$('u-at').textContent='刷新失败：'+e.message+'（30 秒后再试）';}
+  finally{if(manual){b.disabled=false;b.textContent='立即刷新';}}}
+function usageTimer(on){clearInterval(uTimer);uTimer=on?setInterval(()=>{if(view==='usage'&&document.visibilityState==='visible')loadUsage(false);},30000):null;}
+$('u-refresh').addEventListener('click',()=>loadUsage(true));
+$('u-rows').addEventListener('input',()=>{uEditing=true;});
 function renderUsage(){const T=$('u-rows');T.replaceChildren();
   usage.forEach((u,i)=>{const tr=document.createElement('tr');const pct=Math.min(100,Math.round(u.used/u.cap*100));
     const cells=[u.label,String(u.req),u.tokIn.toLocaleString()+' / '+u.tokOut.toLocaleString()];
@@ -178,6 +188,6 @@ $('u-save').addEventListener('click',async()=>{const b=$('u-save'),m=$('u-msg');
   usage.forEach((u,i)=>{const el=$('cap-'+i);const v=Number(el.value);const ok=Number.isInteger(v)&&v>=1&&v<=u.max;el.setAttribute('aria-invalid',String(!ok));if(!ok)bad.push(u.label+' 要在 1～'+u.max.toLocaleString()+' 之间');caps[u.model]=v;});
   if(bad.length){m.className='msg';m.textContent='没保存：'+bad.join('；');return;}
   b.disabled=true;b.textContent='正在保存…';m.textContent='';
-  try{usage=(await call('/api/usage',{caps})).rows;renderUsage();m.className='msg ok';m.textContent='✓ 已保存，下一次请求开始生效';}catch(e){m.className='msg';m.textContent=e.message;}finally{b.disabled=false;b.textContent='保存上限';}});
+  try{usage=(await call('/api/usage',{caps})).rows;uEditing=false;renderUsage();uStamp();m.className='msg ok';m.textContent='✓ 已保存，下一次请求开始生效';}catch(e){m.className='msg';m.textContent=e.message;}finally{b.disabled=false;b.textContent='保存上限';}});
 call(query()).then(j=>{state=j;showApp();render();}).catch(()=>{});
 </script></body></html>`;

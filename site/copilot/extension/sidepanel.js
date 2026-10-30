@@ -84,16 +84,17 @@ const SCORE_EVERY_MS = 10_000;
  * 每个窗口的侧边栏各用各的（2026-10-30 Amos：第一个窗口设 80 分、第二个设 70 分，第一个却存了 75 分的）；
  * 保存时也记进 chrome.storage.local，只当"新打开的侧边栏"的初始值，不会改到已经开着的别的窗口。
  */
-const LIM_RANGE = { min: [5, 30, '分钟'], posts: [10, 60, '条'], score: [60, 95, '分'] };
-let lim = { min: 30, posts: 60, score: 75 };
+// 0.3.5（Amos 2026-10-30 B-1 选 A）：不再限制每次读几条，改成每次最多存进清单几条（默认 10）；时间上限照旧
+const LIM_RANGE = { min: [5, 30, '分钟'], queue: [1, 50, '条'], score: [60, 95, '分'] };
+let lim = { min: 30, queue: 10, score: 75 };
 function limOk(v) { return Object.entries(LIM_RANGE).every(([k, [lo, hi]]) => Number.isInteger(v[k]) && v[k] >= lo && v[k] <= hi); }
 function limView() {
-  $('auto-limit').textContent = `本次最多 ${lim.min} 分钟 / ${lim.posts} 条，到了自动停`;
+  $('auto-limit').textContent = `本次最多 ${lim.min} 分钟，或存满 ${lim.queue} 条清单，到了自动停`;
   $('m-queued-t').textContent = `进清单（≥ ${lim.score} 分）`;
   $('empty-score').textContent = lim.score;
   for (const k of Object.keys(LIM_RANGE)) $('lim-' + k).value = lim[k];
 }
-chrome.storage.local.get('qcLim').then(({ qcLim }) => { if (qcLim && limOk(qcLim)) lim = qcLim; limView(); }).catch(() => limView());
+chrome.storage.local.get('qcLim2').then(({ qcLim2 }) => { if (qcLim2 && limOk(qcLim2)) lim = qcLim2; limView(); }).catch(() => limView());
 const saveQ = []; // { tabId, platform, post, score }
 const saveSeen = new Set(); // 已经处理过的帖子（同一条不重复写稿）
 // 手动页的计数（从打开侧边栏算起；2026-10-30 Amos：要看得到抓到了多少条）
@@ -400,7 +401,7 @@ async function autoLoop() {
   let pauseFrom = 0;
   while (auto.on) {
     if (!pauseFrom && Date.now() - auto.started - auto.pausedMs >= lim.min * 60_000) return autoStop(`本次已到上限：${lim.min} 分钟`);
-    if (auto.read >= lim.posts) return autoStop(`本次已到上限：${lim.posts} 条`);
+    if (auto.queued >= lim.queue) return autoStop(`本次已存满 ${lim.queue} 条清单`);
     if (!pauseFrom) autoView('滑动中', 'run');
     let step;
     try { step = await chrome.tabs.sendMessage(auto.tabId, { type: 'qc-auto-step' }); } catch { return autoStop('页面没有回应（可能关掉或刷新了）'); }
@@ -433,7 +434,7 @@ async function autoLoop() {
       autoMsg('');
       addLog('自动：读到新帖子，继续');
     }
-    const posts = step.posts.slice(0, lim.posts - auto.read);
+    const posts = step.posts;
     auto.read += posts.length;
     autoView('等打分结果', 'wait');
     addLog(`自动：这一屏读到 ${posts.length} 条`);
@@ -447,6 +448,7 @@ async function autoLoop() {
       addLog(`自动：打分 ${r.items.map((x) => x.score).join('、')}${r.engine === 'workers-ai' ? '（备用 AI）' : ''}`);
       for (const it of r.items.filter((x) => x.score >= lim.score && !saveSeen.has(x.id))) {
         if (!auto.on) return;
+        if (auto.queued >= lim.queue) return autoStop(`本次已存满 ${lim.queue} 条清单`);
         const post = batch.find((p) => p.id === it.id);
         if (!post) continue;
         saveSeen.add(it.id);
@@ -478,12 +480,12 @@ $('lim-save').addEventListener('click', async () => {
   b.disabled = true;
   b.textContent = '正在保存…';
   try {
-    await chrome.storage.local.set({ qcLim: v });
+    await chrome.storage.local.set({ qcLim2: v });
     lim = v;
     limView();
     m.className = 'msg ok';
-    m.textContent = `✓ 已保存：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单（只对这个窗口生效，另一个窗口不受影响；正在跑的自动模式下一屏起生效）`;
-    addLog(`设置已改：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单`);
+    m.textContent = `✓ 已保存：${v.min} 分钟 / 存满 ${v.queue} 条 / ${v.score} 分以上进清单（只对这个窗口生效，另一个窗口不受影响；正在跑的自动模式下一屏起生效）`;
+    addLog(`设置已改：${v.min} 分钟 / 存满 ${v.queue} 条 / ${v.score} 分以上进清单`);
   } catch (e) {
     m.className = 'msg';
     m.textContent = '没保存：' + e.message;
