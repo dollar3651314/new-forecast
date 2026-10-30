@@ -109,7 +109,6 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     addLog(msg.text, msg.level, msg.platform === 'x' ? 'X 页面' : 'Threads 页面');
     return false;
   }
-  if (msg && msg.type === 'qc-auto-hidden') { if (!sender.tab || sender.tab.id === auto.tabId) autoStop('切换了分页或窗口，已停'); return false; }
   if (msg && msg.type === 'qc-posts' && sender.tab) {
     lastContentLog = Date.now();
     if (auto.on) return false;
@@ -324,7 +323,20 @@ async function loadToday() {
 }
 
 // ---- 自动模式（agents C136；状态清单第三节）：侧边栏一步一步驱动页面，每批分析完才滑下一屏 ----
-const auto = { on: false, tabId: null, platform: null, started: 0, read: 0, scored: 0, queued: 0 };
+const auto = { on: false, tabId: null, platform: null, started: 0, pausedMs: 0, read: 0, scored: 0, queued: 0 };
+/**
+ * 什么时候停、什么时候暂停（0.3.2，Amos 2026-10-30 选 A'；团队手册 A8 第 7 条）：
+ * - 在这个窗口切到别的分页、关掉那个分页 → 停（看分页切换，不看"页面看不见"：窗口叠着、露一半也会被 Chrome 当成看不见）
+ * - 连续 3 屏没读到新帖子 → 页面看得见、也滑不动了就是"到底了"（停）；看不见（最小化等，X 不加载）就暂停，每 10 秒试一次，读到新帖自动继续
+ * - 暂停的时间不算进"每次最多 N 分钟"；暂停超过 30 分钟就停
+ */
+const IDLE_STEPS = 3;
+const PAUSE_RETRY_MS = 10_000;
+const PAUSE_MAX_MS = 30 * 60_000;
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (auto.on && windowId === myWindow && tabId !== auto.tabId) autoStop('切到了别的分页，已停');
+});
+chrome.tabs.onRemoved.addListener((tabId) => { if (auto.on && tabId === auto.tabId) autoStop('分页关掉了，已停'); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function autoView(state, kind) {
   // 已经停了：还在路上的那一批回来时只更新数字，状态保持"已停"（2026-10-30 Amos 截图：停了还显示"等打分结果"）
@@ -370,21 +382,49 @@ async function autoStart() {
   if (!chk || !chk.ok) return fail('当前分页不是 X / Threads，或者页面是装插件之前打开的：请切到 X 首页，刷新一次再开');
   if (chk.blocked) return fail('页面上有"' + chk.blocked + '"的提示，请先看一眼页面');
   try { await api('/v1/today'); } catch (e) { return fail(e.message); }
-  Object.assign(auto, { on: true, tabId: tab.id, platform: chk.platform, started: Date.now(), read: 0, scored: 0, queued: 0 });
+  Object.assign(auto, { on: true, tabId: tab.id, platform: chk.platform, started: Date.now(), pausedMs: 0, read: 0, scored: 0, queued: 0 });
   chrome.tabs.sendMessage(tab.id, { type: 'qc-auto-on' }).catch(() => {});
   addLog('自动模式开始（' + (chk.platform === 'x' ? 'X' : 'Threads') + '）');
   autoLoop().catch((e) => autoStop('出错了：' + e.message));
 }
 async function autoLoop() {
+  let idle = 0;
+  let pauseFrom = 0;
   while (auto.on) {
-    if (Date.now() - auto.started >= lim.min * 60_000) return autoStop(`本次已到上限：${lim.min} 分钟`);
+    if (!pauseFrom && Date.now() - auto.started - auto.pausedMs >= lim.min * 60_000) return autoStop(`本次已到上限：${lim.min} 分钟`);
     if (auto.read >= lim.posts) return autoStop(`本次已到上限：${lim.posts} 条`);
-    autoView('滑动中', 'run');
+    if (!pauseFrom) autoView('滑动中', 'run');
     let step;
     try { step = await chrome.tabs.sendMessage(auto.tabId, { type: 'qc-auto-step' }); } catch { return autoStop('页面没有回应（可能关掉或刷新了）'); }
     if (!auto.on) return;
-    if (!step || step.hidden) return autoStop('切换了分页或窗口，已停');
+    if (!step) return autoStop('页面没有回应（可能关掉或刷新了）');
     if (step.blocked) return autoStop('已停：' + step.blocked + '，请看一眼页面');
+    if (!step.posts.length) {
+      idle += 1;
+      if (pauseFrom) {
+        if (Date.now() - pauseFrom >= PAUSE_MAX_MS) return autoStop('暂停超过 30 分钟，已停');
+        await sleep(PAUSE_RETRY_MS);
+        continue;
+      }
+      if (idle >= IDLE_STEPS && !step.hidden && step.end) return autoStop('页面到底了');
+      if (idle >= IDLE_STEPS && step.hidden) {
+        pauseFrom = Date.now();
+        autoView('暂停中', 'wait');
+        autoMsg('暂停中：页面没有加载新帖子（窗口可能被最小化），露出来后自动继续；暂停的时间不算进上限');
+        addLog('自动：连续 ' + IDLE_STEPS + ' 屏没有新帖子，页面看不见，暂停', 'warn');
+        await sleep(PAUSE_RETRY_MS);
+        continue;
+      }
+      await sleep(800);
+      continue;
+    }
+    idle = 0;
+    if (pauseFrom) {
+      auto.pausedMs += Date.now() - pauseFrom;
+      pauseFrom = 0;
+      autoMsg('');
+      addLog('自动：读到新帖子，继续');
+    }
     const posts = step.posts.slice(0, lim.posts - auto.read);
     auto.read += posts.length;
     autoView('等打分结果', 'wait');
@@ -408,7 +448,6 @@ async function autoLoop() {
         } catch (e) { saveSeen.delete(it.id); return autoStop('AI 出错：' + e.message); }
       }
     }
-    if (step.end && posts.length === 0) return autoStop('页面到底了');
     await sleep(800);
   }
 }
