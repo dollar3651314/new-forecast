@@ -62,9 +62,46 @@ export function extractJson(text: string): unknown {
     try {
       return JSON.parse(t.slice(a, b + 1));
     } catch {
-      throw bad();
+      try {
+        return JSON.parse(repairBrackets(t.slice(a)));
+      } catch {
+        throw bad();
+      }
     }
   }
+}
+
+/**
+ * 补齐括号：Qwen 有时少写一个 ]（例如 "reasons":["…"}]} ），或者回答被截断少了结尾（2026-10-30 Amos 两个窗口一起跑时日志里出现）。
+ * 在字符串外面按顺序检查 { [ 和 } ]：遇到对不上的右括号，先补上该有的右括号；最后补齐没关上的。只修括号，不改内容。
+ */
+export function repairBrackets(s: string): string {
+  const stack: string[] = [];
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  for (const ch of s) {
+    if (inStr) {
+      out += ch;
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
+    else if (ch === '}' || ch === ']') {
+      while (stack.length && stack[stack.length - 1] !== ch) out += stack.pop();
+      if (!stack.length) break; // 多出来的右括号：后面都不要
+      stack.pop();
+      out += ch;
+      if (!stack.length) return out;
+      continue;
+    }
+    out += ch;
+  }
+  if (inStr) out += '"';
+  return out + stack.reverse().join('');
 }
 
 export async function askWorkersAi(env: Env, system: string, user: string, now: number): Promise<unknown> {
@@ -76,7 +113,8 @@ export async function askWorkersAi(env: Env, system: string, user: string, now: 
   try {
     r = await ai.run(WAI_MODEL, {
       messages: [
-        { role: 'system', content: system },
+        // Qwen 偶尔漏括号：再强调一次只要合法 JSON（括号漏了还有 repairBrackets 兜底）
+        { role: 'system', content: `${system}\n\n【输出】只输出一个合法的 JSON 对象，不要任何说明文字；每个数组都要用 ] 关上，字符串数组里每一项都用双引号。` },
         { role: 'user', content: `${user}\n/no_think` },
       ],
       max_tokens: MAX_OUT,

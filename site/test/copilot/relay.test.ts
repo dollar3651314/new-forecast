@@ -205,6 +205,10 @@ describe('备用 AI（Workers AI，2026-10-30 Amos 选 A）', () => {
     expect(await r.json()).toEqual({ ...ok, engine: 'gemini' });
     expect(ai.calls).toHaveLength(0);
     expect(extractJson('说明文字 {"a":1} 结尾')).toEqual({ a: 1 });
+    // 少一个 ]、回答被截断、多出右括号（2026-10-30 测试版"回答不是 JSON"）
+    expect(extractJson('{"items":[{"id":"DfF5","score":0,"reasons":["無討論空間，僅個人投資經驗分享"}]}')).toEqual({ items: [{ id: 'DfF5', score: 0, reasons: ['無討論空間，僅個人投資經驗分享'] }] });
+    expect(extractJson('{"items":[{"id":"a","score":70,"reasons":["NBA 焦點}戰"')).toEqual({ items: [{ id: 'a', score: 70, reasons: ['NBA 焦點}戰'] }] });
+    expect(extractJson('{"a":[1,2]}]}')).toEqual({ a: [1, 2] });
     const ai2 = fakeAi({ choices: [{ message: { content: { items: [] } } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
     const r2 = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env({ AI: ai2.AI }), T0, fakeGemini(...quota()).fetcher);
     expect(r2.status).toBe(200);
