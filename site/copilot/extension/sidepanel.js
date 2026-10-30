@@ -59,7 +59,15 @@ async function api(path, body) {
   });
   if (r.status === 401) throw new Error('连接令牌不对，请到"设置"重新填');
   if (r.status === 404) throw new Error('中转服务还没开通（地址不对，或者 Cloudflare 里还没填令牌和 Gemini Key）');
-  if (r.status === 429) { const j = await r.json().catch(() => ({})); throw new Error(j.error === 'daily cap' ? `今天已经回了 ${j.cap} 条，到上限了` : '太频繁了，等一分钟再试'); }
+  if (r.status === 429) {
+    const j = await r.json().catch(() => ({}));
+    if (j.error === 'daily cap') throw new Error(`今天已经回了 ${j.cap} 条，到上限了`);
+    // 中转服务每分钟的请求上限：和 AI 忙一样自动等，不停下（2026-10-30 Amos：两个窗口一起跑时"太频繁了，等一分钟再试"就停了）
+    const e = new Error('请求太频繁（中转服务每分钟有上限），60 秒后自动继续');
+    e.busy = true;
+    e.waitMs = 60_000;
+    throw e;
+  }
   // 503：每个模型为什么用不了（2026-10-30 Amos：不要只说"团队忙"，要说清楚是哪个模型、什么原因）
   if (r.status === 503) { const j = await r.json().catch(() => ({})); const e = new Error('AI 暂时都用不了：' + (j.detail || '免费额度用完') + '。30 秒后自动再试'); e.busy = true; throw e; }
   if (r.status === 502) { const j = await r.json().catch(() => ({})); throw new Error('AI 没有回答' + (j.detail ? '：' + j.detail : '') + '。稍后再试'); }
@@ -135,7 +143,7 @@ setInterval(async () => {
     try {
       if (await saveToList(it)) man.queued += 1;
     } catch (e) {
-      if (e.busy) { saveQ.unshift(it); pauseUntil = Date.now() + 30_000; } else saveSeen.delete(it.post.id);
+      if (e.busy) { saveQ.unshift(it); pauseUntil = Date.now() + (e.waitMs || 30_000); } else saveSeen.delete(it.post.id);
       addLog(`${it.post.author}（${it.score} 分）没存进清单：${e.message}`, e.busy ? 'warn' : 'error');
       say(e.message);
       $('msg').dataset.kind = 'score';
@@ -169,7 +177,7 @@ setInterval(async () => {
     }
   } catch (e) {
     pending.unshift(...batch); // 没打成分的放回去，下次再送
-    if (e.busy) pauseUntil = Date.now() + 30_000;
+    if (e.busy) pauseUntil = Date.now() + (e.waitMs || 30_000);
     else pauseUntil = Date.now() + 60_000;
     setStatus(!!e.busy, e.busy ? '营销团队忙，稍等' : '未连接');
     addLog('打分失败：' + e.message, e.busy ? 'warn' : 'error');
@@ -357,15 +365,15 @@ function autoStop(reason) {
   autoMsg(reason);
   addLog('自动模式停止：' + reason, 'warn');
 }
-/** Gemini 忙（503）时等 30 秒再试，最多 3 次；其他错误抛出去让自动模式停下 */
+/** AI 忙（503）等 30 秒、请求太频繁（429）等 60 秒再试，最多 3 次；其他错误抛出去让自动模式停下 */
 async function withBusy(fn) {
   for (let i = 0; ; i++) {
     try { const r = await fn(); if (i) autoMsg(''); return r; } catch (e) {
       if (!e.busy || i >= 2 || !auto.on) throw e;
-      autoView('AI 暂时用不了，30 秒后继续', 'wait');
+      autoView(e.waitMs ? '请求太频繁，60 秒后继续' : 'AI 暂时用不了，30 秒后继续', 'wait');
       autoMsg(e.message);
       addLog(e.message, 'warn');
-      await sleep(30_000);
+      await sleep(e.waitMs || 30_000);
     }
   }
 }
