@@ -1,5 +1,0 @@
-.qc-badge{display:inline-flex;align-items:center;gap:6px;margin:6px 0 8px 56px;padding:3px 10px;border-radius:99px;border:0;
-  background:#D5F5F0;color:#0F1B33;font:600 12px/1.6 "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;cursor:pointer}
-.qc-badge::before{content:"";width:8px;height:8px;border-radius:50%;background:#14B8A6}
-.qc-badge.qc-low{background:transparent;color:#64748B;cursor:default}
-.qc-badge.qc-low::before{background:#94A3B8}
