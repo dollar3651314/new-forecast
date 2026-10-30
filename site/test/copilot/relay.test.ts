@@ -103,12 +103,13 @@ describe('打分', () => {
     expect((await handle(req('POST', '/v1/score', { product: 'nope', platform: 'x', posts: [POST] }), env(), T0)).status).toBe(400);
     expect((await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'ig', posts: [POST] }), env(), T0)).status).toBe(400);
     expect((await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [{ id: 'a b', text: 'x' }] }), env(), T0)).status).toBe(400);
-    const bad = fakeGemini(new Response('oops', { status: 500 }));
+    // 5xx 换下一个模型；三个都 5xx 才报错
+    const bad = fakeGemini(...[1, 2, 3].map(() => new Response('oops', { status: 500 })));
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, bad.fetcher);
     expect(r.status).toBe(502);
     // 原因给插件显示，不含 Key
     const j = (await r.json()) as { detail: string };
-    expect(j.detail).toBe('gemini-3.8-flash: HTTP 500');
+    expect(j.detail).toBe('no model available (gemini-flash-latest: HTTP 500)');
     expect(JSON.stringify(j)).not.toContain('ci_only_gemini_key');
   });
   it('思考强度设成 low；模型不认这个设置（400）就去掉再试一次', async () => {
@@ -121,10 +122,33 @@ describe('打分', () => {
     expect(cfgs[1].thinkingConfig).toBeUndefined();
   });
   it('Gemini 超额（429）返回 503 + 30 秒后再试（2026-10-29 测试版：滚动几条就报错）', async () => {
-    const g = fakeGemini(new Response('quota', { status: 429 }));
+    // 免费额度按模型算：第一个超额就换下一个
+    const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ id: POST.id, score: 61, reasons: [] }] }) }] } }] };
+    const g1 = fakeGemini(new Response('quota', { status: 429 }), new Response(JSON.stringify(ok), { status: 200 }));
+    expect(((await (await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g1.fetcher)).json()) as { items: { score: number }[] }).items[0].score).toBe(61);
+    // 全都超额才算忙
+    const g = fakeGemini(...[1, 2, 3].map(() => new Response('quota', { status: 429 })));
     const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
     expect(r.status).toBe(503);
     expect(await r.json()).toEqual({ error: 'team busy', retryAfter: 30 });
+  });
+  it('某个模型超时或 5xx 就换下一个；诊断接口报每个模型的状态（不含 Key）', async () => {
+    const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ id: POST.id, score: 66, reasons: [] }] }) }] } }] };
+    let n = 0;
+    const fetcher = async (url: string) => {
+      n += 1;
+      if (url.includes('gemini-3.8-flash')) { const e = new Error('t'); e.name = 'TimeoutError'; throw e; }
+      if (url.includes('gemini-3.6-flash')) return new Response('down', { status: 503 });
+      return new Response(JSON.stringify(ok), { status: 200 });
+    };
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, fetcher);
+    expect(((await r.json()) as { items: { score: number }[] }).items[0].score).toBe(66);
+    expect(n).toBe(3);
+    const d = await handle(req('GET', '/v1/diag'), env(), T0, async (url: string) => (url.includes('3.8') ? new Response('{"error":"key AIzaSyFAKE123 bad"}', { status: 403 }) : new Response(JSON.stringify(ok), { status: 200 })));
+    const models = ((await d.json()) as { models: { model: string; ok: boolean; detail: string }[] }).models;
+    expect(models.map((m) => [m.model, m.ok])).toEqual([['gemini-3.8-flash', false], ['gemini-3.6-flash', true], ['gemini-flash-latest', true]]);
+    expect(models[0].detail).toContain('HTTP 403');
+    expect(models[0].detail).not.toContain('AIzaSyFAKE123');
   });
   it('模型名不存在（404）就换下一个；全都 404 才算出错；回答被 ```json 包住也能读', async () => {
     const ok = { candidates: [{ content: { parts: [{ text: '```json\n{"items":[{"id":"' + POST.id + '","score":70,"reasons":["NBA"]}]}\n```' }] } }] };
