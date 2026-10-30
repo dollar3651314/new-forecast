@@ -72,8 +72,8 @@ describe('默认关着、令牌和来源', () => {
     // 指定了插件 ID 时只接受那一个
     expect((await handle(req('GET', '/v1/today'), env({ ALLOWED_ORIGIN: 'chrome-extension://ppppppppppppppppppppppppppppppp' }), T0)).status).toBe(404);
   });
-  it('全站每分钟最多 30 次', async () => {
-    for (let i = 0; i < 30; i++) expect((await handle(req('GET', '/v1/today'), env(), T0)).status).toBe(200);
+  it('全站每分钟最多 60 次（两个窗口一起跑）', async () => {
+    for (let i = 0; i < 60; i++) expect((await handle(req('GET', '/v1/today'), env(), T0)).status).toBe(200);
     expect((await handle(req('GET', '/v1/today'), env(), T0)).status).toBe(429);
     expect((await handle(req('GET', '/v1/today'), env(), T0 + 60_000)).status).toBe(200);
   });

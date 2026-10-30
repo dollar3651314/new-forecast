@@ -11,7 +11,7 @@
  * 令牌：Authorization: Bearer <COPILOT_TOKEN>（≥ 24 个字符）。COPILOT_TOKEN 或 GEMINI_API_KEY 没填时 /v1/* 全部 404（默认关着，C102）。
  * Gemini 都用不了时换备用 AI（Workers AI，ai.ts）；草稿带 engine 标出是哪个 AI 写的。
  * Gemini 超额（429）返回 503 + retryAfter，插件自动排队再试；其他 Gemini 错误返回 502 + detail（原因，不含 Key）。
- * 来源：只接受 chrome-extension:// 的请求（有 ALLOWED_ORIGIN 时只接受那一个）；全站每分钟最多 30 次。
+ * 来源：只接受 chrome-extension:// 的请求（有 ALLOWED_ORIGIN 时只接受那一个）；全站每分钟最多 60 次（2026-10-30 两个窗口一起跑会超过 30 次；插件遇到 429 自动等 60 秒）。
  */
 import { checkDraft, isExcludedTopic, type Platform } from './checks';
 import type { Env } from './env';
@@ -22,7 +22,7 @@ import { ADMIN_PAGE } from './admin-page';
 import { adminApi, adminEnabled, doneToday, saveToQueue } from './queue';
 
 const RULES: Record<string, string> = { forecast: FORECAST_RULES };
-const PER_MINUTE = 30;
+const PER_MINUTE = 60;
 const TW_MS = 8 * 3600_000;
 
 export function twDay(now: number): string {
