@@ -85,13 +85,17 @@ function manView() {
 let scoring = false; // 上一批还没回来就不送下一批（Gemini 最长要等 45 秒）
 const pending = []; // { tabId, platform, post }
 let pauseUntil = 0;
+// 每个 Chrome 窗口有自己的侧边栏：只处理本窗口里的 X / Threads 分页（2026-10-30 Amos：想 X 和 Threads 一起跑——两个窗口并排，各开一个侧边栏）
+let myWindow = null;
+chrome.windows.getCurrent().then((w) => { myWindow = w.id; }).catch(() => {});
 chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (sender.tab && myWindow != null && sender.tab.windowId !== myWindow) return false;
   if (msg && msg.type === 'qc-log' && sender.tab) {
     lastContentLog = Date.now();
     addLog(msg.text, msg.level, msg.platform === 'x' ? 'X 页面' : 'Threads 页面');
     return false;
   }
-  if (msg && msg.type === 'qc-auto-hidden') { autoStop('切换了分页或窗口，已停'); return false; }
+  if (msg && msg.type === 'qc-auto-hidden') { if (!sender.tab || sender.tab.id === auto.tabId) autoStop('切换了分页或窗口，已停'); return false; }
   if (msg && msg.type === 'qc-posts' && sender.tab) {
     lastContentLog = Date.now();
     if (auto.on) return false;
