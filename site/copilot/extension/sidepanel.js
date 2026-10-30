@@ -327,6 +327,8 @@ async function loadToday() {
 const auto = { on: false, tabId: null, platform: null, started: 0, read: 0, scored: 0, queued: 0 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function autoView(state, kind) {
+  // 已经停了：还在路上的那一批回来时只更新数字，状态保持"已停"（2026-10-30 Amos 截图：停了还显示"等打分结果"）
+  if (!auto.on && kind !== 'stop') { state = '已停'; kind = 'stop'; }
   $('auto-state').textContent = state;
   $('auto-state').className = 'pill ' + kind;
   $('auto-toggle').setAttribute('aria-checked', String(auto.on));
