@@ -2,7 +2,7 @@
  * 跟帖评论清单（原"待回复清单"，agents C136；0.3 改名）：插件存进来，Amos 在网页后台点"一键回复"→ 官方回复窗口 → 本人按发送 → 回来点"我回了"。
  * - 插件用（令牌）：POST /v1/queue {product, platform, post:{id, author, text, ageMinutes}, score, reasons, draft, source}；同一条帖子只存一次。
  * - 后台用（密码登录后的会话 Cookie）：
- *   GET /api/queue?status=pending|done|skip&product=&platform=&from=YYYY-MM-DD&to=YYYY-MM-DD（按存进来的台湾日期）、POST /api/queue/<id> {status}、
+ *   GET /api/queue?status=pending|done|skip&product=&platform=&from=YYYY-MM-DD&to=YYYY-MM-DD（按存进来的台湾日期）&sort=time|score、POST /api/queue/<id> {status}、
  *   POST /api/queue/delete {ids}（Amos 自己删；记录不自动删，D-4 选 B）、GET /api/usage、POST /api/usage {caps}（用量和限额，usage.ts）、POST /api/login、POST /api/logout。
  * 登录：密钥 COPILOT_PASSWORD（≥ 16 个字符，没填时后台 404）；同一 IP 15 分钟错 5 次锁 15 分钟，全站 1 小时错 20 次锁 1 小时；
  * 失败一律回答同一句（不透露锁定规则，C128）；会话 12 小时，签名密钥由密码派生，改密码旧会话全部失效。
@@ -117,8 +117,11 @@ export async function adminApi(env: Env, req: Request, now: number): Promise<Res
     if (Number.isFinite(day(q.get('from')))) add('at >= ?', day(q.get('from')));
     if (Number.isFinite(day(q.get('to')))) add('at < ?', day(q.get('to')) + 24 * 3600_000);
     const cond = where.join(' AND ');
+    // 排序：默认按时间（待回按存进来、其他按处理时间，新的在前）；sort=score 按评分从高到低，同分新的在前（2026-10-30 Amos：帖子多时先处理评分高的）
+    const byTime = status === 'pending' ? 'at DESC' : 'updated_at DESC';
+    const order = q.get('sort') === 'score' ? `score IS NULL, score DESC, ${byTime}` : byTime;
     const [r, total, products] = await Promise.all([
-      env.DB.prepare(`SELECT id, at, updated_at, product, platform, post_id, author, snippet, post_at, score, reasons, draft, source, engine, status FROM queue WHERE ${cond} ORDER BY ${status === 'pending' ? 'at DESC' : 'updated_at DESC'} LIMIT ${LIST_MAX}`).bind(...args)
+      env.DB.prepare(`SELECT id, at, updated_at, product, platform, post_id, author, snippet, post_at, score, reasons, draft, source, engine, status FROM queue WHERE ${cond} ORDER BY ${order} LIMIT ${LIST_MAX}`).bind(...args)
         .all<{ id: number; at: number; updated_at: number; product: string; platform: 'x' | 'threads'; post_id: string; author: string; snippet: string; post_at: number | null; score: number | null; reasons: string; draft: string; source: string; engine: string; status: string }>(),
       env.DB.prepare(`SELECT COUNT(*) AS n FROM queue WHERE ${cond}`).bind(...args).first<{ n: number }>(),
       env.DB.prepare('SELECT DISTINCT product FROM queue ORDER BY product').all<{ product: string }>(),

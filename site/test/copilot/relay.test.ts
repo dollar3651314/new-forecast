@@ -99,6 +99,8 @@ describe('打分', () => {
     expect(g.calls[0].url).not.toContain('ci_only_gemini_key');
     const sent = g.calls[0].body.contents[0].parts[0].text;
     expect(sent).toContain(POST.text);
+    // 分数精确到 1 分（2026-10-30 Amos：不要只有 75、80、85）
+    expect(sent).toContain('分数精确到 1 分');
     expect(sent).not.toContain('總統');
   });
   it('请求不对 400；Gemini 出错 502（插件显示"团队暂时没回应"）', async () => {
@@ -418,6 +420,11 @@ describe('0.3：清单的打分依据、筛选、删除；用量和限额', () =
     expect(mark.status).toBe(200);
     const skipped = (await (await handle(page('/api/queue?status=skip', { cookie: ck }), env(), T0)).json()) as { items: Item[] };
     expect(skipped.items[0].handledAt).toBe(T0 + 5000);
+    // 排序：默认新的在前；sort=score 评分从高到低（2026-10-30 Amos：帖子多时先处理评分高的）
+    await handle(req('POST', '/v1/queue', { product: 'forecast', platform: 'x', post: { ...POST, id: 'a3' }, score: 70, draft: 'Curry 會先熱手嗎？', source: '' }), env(), T0 - 1000);
+    const scoreOf = (r: { items: Item[] }) => r.items.map((x) => (x as unknown as { score: number }).score);
+    expect(scoreOf(await list(ck))).toEqual([70, 80]);
+    expect(scoreOf(await list(ck, '&sort=score'))).toEqual([80, 70]);
   });
   it('删除：要登录、要同一来源；只删给定的；请求不对 400', async () => {
     await save('d1', 'x', T0);

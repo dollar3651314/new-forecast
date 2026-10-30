@@ -67,7 +67,8 @@ th{font-size:12px;color:var(--muted);font-weight:600}td.n{text-align:right}
   <section id="v-list">
     <div class="filters" role="group" aria-label="状态"><button class="chip" data-f="pending" aria-pressed="true">待回</button><button class="chip" data-f="done" aria-pressed="false">已回</button><button class="chip" data-f="skip" aria-pressed="false">跳过</button>
       <label for="f-prod">项目</label><select id="f-prod"><option value="">全部</option></select>
-      <label for="f-plat">平台</label><select id="f-plat"><option value="">全部</option><option value="x">X</option><option value="threads">Threads</option></select></div>
+      <label for="f-plat">平台</label><select id="f-plat"><option value="">全部</option><option value="x">X</option><option value="threads">Threads</option></select>
+      <label for="f-sort">排序</label><select id="f-sort"><option value="time">最新的在前</option><option value="score">评分从高到低</option></select></div>
     <div class="filters" role="group" aria-label="时间"><label>存进来的时间（台湾）</label><button class="chip" data-rg="today" aria-pressed="false">今天</button><button class="chip" data-rg="7" aria-pressed="false">近 7 天</button><button class="chip" data-rg="all" aria-pressed="true">全部</button>
       <label for="f-from">从</label><input type="date" id="f-from"><label for="f-to">到</label><input type="date" id="f-to"></div>
     <p class="sum"><span id="total"></span><span class="sp"></span><button class="btn small danger" id="bulk" type="button" hidden>删除筛选出的这些</button></p>
@@ -102,7 +103,10 @@ function setRange(rg){document.querySelectorAll('[data-rg]').forEach(x=>x.setAtt
 document.querySelectorAll('[data-rg]').forEach(b=>b.addEventListener('click',()=>setRange(b.dataset.rg)));
 ['f-from','f-to'].forEach(id=>$(id).addEventListener('change',()=>{document.querySelectorAll('[data-rg]').forEach(x=>x.setAttribute('aria-pressed','false'));load();}));
 ['f-prod','f-plat'].forEach(id=>$(id).addEventListener('change',()=>load()));
-function query(){const q=new URLSearchParams({status:filter});if($('f-prod').value)q.set('product',$('f-prod').value);if($('f-plat').value)q.set('platform',$('f-plat').value);if($('f-from').value)q.set('from',$('f-from').value);if($('f-to').value)q.set('to',$('f-to').value);return '/api/queue?'+q;}
+// 排序记在这台电脑上，下次打开还是同样的排序
+try{if(localStorage.getItem('qc-sort')==='score')$('f-sort').value='score';}catch(e){}
+$('f-sort').addEventListener('change',()=>{try{localStorage.setItem('qc-sort',$('f-sort').value);}catch(e){}load();});
+function query(){const q=new URLSearchParams({status:filter});if($('f-prod').value)q.set('product',$('f-prod').value);if($('f-plat').value)q.set('platform',$('f-plat').value);if($('f-from').value)q.set('from',$('f-from').value);if($('f-to').value)q.set('to',$('f-to').value);if($('f-sort').value==='score')q.set('sort','score');return '/api/queue?'+q;}
 async function load(){
   $('bulk-confirm').hidden=true;
   try{state=await call(query());}catch(e){if(e.message!=='请重新登录')toast(e.message,true);return;}
