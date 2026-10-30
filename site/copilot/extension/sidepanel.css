@@ -48,3 +48,6 @@ td,th{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;vertic
 .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .kpi{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--surface)}.kpi .n{font:500 20px ui-monospace,monospace;font-variant-numeric:tabular-nums}.kpi .t{font-size:12px;color:var(--muted)}
 a.btn{text-align:center;text-decoration:none}
+/* 0.3 设置：每次的上限和进清单的分数 */
+.sep{border:0;border-top:1px solid var(--line);width:100%;margin:4px 0}
+input[aria-invalid="true"]{border-color:var(--err)}

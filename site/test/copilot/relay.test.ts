@@ -27,7 +27,7 @@ beforeAll(async () => {
 });
 afterAll(async () => dispose());
 beforeEach(async () => {
-  await db.batch(['events', 'rate', 'queue', 'auth_fail', 'auth_lock', 'ai_usage'].map((t) => db.prepare(`DELETE FROM ${t}`)));
+  await db.batch(['events', 'rate', 'queue', 'auth_fail', 'auth_lock', 'ai_usage', 'model_usage', 'settings'].map((t) => db.prepare(`DELETE FROM ${t}`)));
 });
 
 const PASS = 'ci_only_copilot_password_01';
@@ -290,7 +290,7 @@ describe('写稿和程序检查', () => {
 });
 
 describe('记录、每天上限和当天汇总', () => {
-  it('同意超过每天上限 429；跳过不算；当天汇总按台湾日期；30 天前的记录删掉', async () => {
+  it('同意超过每天上限 429；跳过不算；当天汇总按台湾日期；旧记录一直保留（D-4 选 B）', async () => {
     await db.prepare("INSERT INTO events (at, day, product, platform, post_id, action) VALUES (?1, '2026-09-01', 'forecast', 'x', 'old', 'approve')").bind(T0 - 31 * 24 * 3600_000).run();
     const log = (action: string, id: string) => handle(req('POST', '/v1/log', { product: 'forecast', platform: 'x', postId: id, author: '@a', score: 80, action, draft: '回覆' }), env(), T0);
     expect((await log('approve', 'p1')).status).toBe(200);
@@ -301,11 +301,11 @@ describe('记录、每天上限和当天汇总', () => {
     const t = (await (await handle(req('GET', '/v1/today'), env(), T0)).json()) as { day: string; cap: number; approved: number; skipped: number; items: unknown[] };
     expect(t).toMatchObject({ day: twDay(T0), cap: 2, approved: 2, skipped: 1 });
     expect(t.day).toBe('2026-10-29');
-    expect((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = 'old'").first<{ n: number }>())!.n).toBe(0);
+    expect((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = 'old'").first<{ n: number }>())!.n).toBe(1);
   });
 });
 
-describe('待回复清单（C136）', () => {
+describe('跟帖评论清单（C136；0.3 原"待回复清单"）', () => {
   const page = (p: string, init: RequestInit & { cookie?: string; ip?: string } = {}) =>
     new Request(`https://copilot.example.test${p}`, {
       ...init,
@@ -334,7 +334,8 @@ describe('待回复清单（C136）', () => {
     await save('勇士主場優勢大嗎？', '1850000000000000009');
     expect((await handle(page('/api/queue'), env(), T0)).status).toBe(401);
     const html = await (await handle(page('/'), env(), T0)).text();
-    expect(html).toContain('待回复清单');
+    expect(html).toContain('跟帖评论清单');
+    expect(html).toContain('用量和限额');
     const ck = await loginCookie();
     const list = (await (await handle(page('/api/queue?status=pending', { cookie: ck }), env(), T0)).json()) as { items: { id: number; replyUrl: string; postUrl: string; stale: boolean }[]; doneToday: number; cap: number };
     expect(list.items).toHaveLength(2);
@@ -382,3 +383,85 @@ describe('待回复清单（C136）', () => {
     expect((await handle(page(`/api/queue/${list.items[1].id}`, { method: 'POST', cookie: ck, body: JSON.stringify({ status: 'done' }) }), env(), T0)).status).toBe(429);
   });
 });
+
+describe('0.3：清单的打分依据、筛选、删除；用量和限额', () => {
+  const page = (p: string, init: RequestInit & { cookie?: string } = {}) =>
+    new Request(`https://copilot.example.test${p}`, { ...init, headers: { 'content-type': 'application/json', origin: 'https://copilot.example.test', 'cf-connecting-ip': '203.0.113.9', ...(init.cookie ? { cookie: init.cookie } : {}) } });
+  async function cookie(): Promise<string> {
+    const r = await handle(page('/api/login', { method: 'POST', body: JSON.stringify({ password: PASS }) }), env(), T0);
+    return r.headers.get('set-cookie')!.split(';')[0];
+  }
+  const save = (id: string, platform: 'x' | 'threads', at: number, reasons: unknown = ['NBA 焦点战', '留言多']) =>
+    handle(req('POST', '/v1/queue', { product: 'forecast', platform, post: { ...POST, id }, score: 80, reasons, draft: 'Curry 會先熱手嗎？', source: '' }), env(), at);
+  type Item = { id: number; product: string; platform: string; reasons: string[]; savedAt: number; postAt: number | null; handledAt: number | null };
+  const list = async (ck: string, q = '') => (await (await handle(page('/api/queue?status=pending' + q, { cookie: ck }), env(), T0)).json()) as { items: Item[]; total: number; products: string[] };
+
+  it('存进来带打分依据（最多 3 条）、项目、平台、存进来和原帖时间；按平台和台湾日期筛选', async () => {
+    await save('a1', 'x', T0, ['一', '二', '三', '四', 5]);
+    await save('a2', 'threads', T0 - 3 * 24 * 3600_000);
+    const ck = await cookie();
+    const all = await list(ck);
+    expect(all.total).toBe(2);
+    expect(all.products).toEqual(['forecast']);
+    const a1 = all.items.find((x) => x.platform === 'x')!;
+    expect(a1).toMatchObject({ product: 'forecast', reasons: ['一', '二', '三'], savedAt: T0, postAt: T0 - 120 * 60_000, handledAt: null });
+    expect((await list(ck, '&platform=threads')).items.map((x) => x.platform)).toEqual(['threads']);
+    const today = twDay(T0);
+    expect((await list(ck, `&from=${today}&to=${today}`)).total).toBe(1);
+    expect((await list(ck, `&to=${twDay(T0 - 2 * 24 * 3600_000)}`)).items.map((x) => x.platform)).toEqual(['threads']);
+    // 处理过的带处理时间
+    const mark = await handle(page(`/api/queue/${a1.id}`, { method: 'POST', cookie: ck, body: JSON.stringify({ status: 'skip' }) }), env(), T0 + 5000);
+    expect(mark.status).toBe(200);
+    const skipped = (await (await handle(page('/api/queue?status=skip', { cookie: ck }), env(), T0)).json()) as { items: Item[] };
+    expect(skipped.items[0].handledAt).toBe(T0 + 5000);
+  });
+  it('删除：要登录、要同一来源；只删给定的；请求不对 400', async () => {
+    await save('d1', 'x', T0);
+    await save('d2', 'x', T0);
+    await save('d3', 'threads', T0);
+    const ck = await cookie();
+    const ids = (await list(ck)).items.map((x) => x.id);
+    const del = (body: unknown, c = ck, origin = 'https://copilot.example.test') =>
+      handle(new Request('https://copilot.example.test/api/queue/delete', { method: 'POST', headers: { 'content-type': 'application/json', origin, ...(c ? { cookie: c } : {}) }, body: JSON.stringify(body) }), env(), T0);
+    expect((await del({ ids: [ids[0]] }, '')).status).toBe(401);
+    expect((await del({ ids: [ids[0]] }, ck, 'https://evil.example')).status).toBe(403);
+    expect((await del({ ids: [] })).status).toBe(400);
+    expect((await del({ ids: ['1; DROP TABLE queue'] })).status).toBe(400);
+    expect(await (await del({ ids: ids.slice(0, 2) })).json()).toEqual({ ok: true, deleted: 2 });
+    expect((await list(ck)).total).toBe(1);
+    // 一次超过 100 条（D1 每条语句最多 100 个参数）也能删
+    for (let i = 0; i < 130; i++) await db.prepare("INSERT INTO queue (at, updated_at, product, platform, post_id, draft) VALUES (?1, ?1, 'forecast', 'x', ?2, 'd')").bind(T0, 'bulk' + i).run();
+    const many = (await (await handle(page('/api/queue?status=pending', { cookie: ck }), env(), T0)).json()) as { items: { id: number }[] };
+    expect(many.items).toHaveLength(131);
+    expect(await (await del({ ids: many.items.map((x) => x.id) })).json()).toEqual({ ok: true, deleted: 131 });
+  });
+  it('用量和限额：记下每个模型的次数和 token；到了我们设的上限就跳过；上限要合法；Workers AI 最多 9500', async () => {
+    const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [] }) }] } }], usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 30, thoughtsTokenCount: 10 } };
+    const g = fakeGemini(new Response(JSON.stringify(ok), { status: 200 }));
+    await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g.fetcher);
+    const ck = await cookie();
+    const u = async () => ((await (await handle(page('/api/usage', { cookie: ck }), env(), T0)).json()) as { rows: { model: string; req: number; tokIn: number; tokOut: number; cap: number; state: string; resetAt: number }[] }).rows;
+    const first = (await u()).find((r) => r.model === 'gemini-3.6-flash')!;
+    expect(first).toMatchObject({ req: 1, tokIn: 120, tokOut: 40, cap: 200, state: 'ok' });
+    expect(first.resetAt).toBeGreaterThan(T0);
+    expect(first.resetAt - T0).toBeLessThanOrEqual(24 * 3600_000);
+    const setCaps = (caps: unknown) => handle(page('/api/usage', { method: 'POST', cookie: ck, body: JSON.stringify({ caps }) }), env(), T0);
+    expect((await setCaps({ 'workers-ai': 12000 })).status).toBe(400);
+    expect((await setCaps({ 'gemini-3.6-flash': 0 })).status).toBe(400);
+    expect((await setCaps({ 'not-a-model': 5 })).status).toBe(400);
+    expect((await setCaps({ 'gemini-3.6-flash': 1, 'workers-ai': 9500 })).status).toBe(200);
+    // 3.6-flash 今天已经用了 1 次 = 上限：跳过，直接问 3.8-flash
+    const g2 = fakeGemini({ items: [] });
+    await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, g2.fetcher);
+    expect(g2.calls.map((c) => c.url.split('/models/')[1].split(':')[0])).toEqual(['gemini-3.8-flash']);
+    const rows = await u();
+    expect(rows.find((r) => r.model === 'gemini-3.6-flash')!.state).toBe('our_cap');
+    // 全都到上限：503 写明原因
+    await setCaps({ 'gemini-3.8-flash': 1, 'gemini-flash-latest': 1 });
+    await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, fakeGemini({ items: [] }).fetcher);
+    const r = await handle(req('POST', '/v1/score', { product: 'forecast', platform: 'x', posts: [POST] }), env(), T0, fakeGemini().fetcher);
+    expect(r.status).toBe(503);
+    expect(((await r.json()) as { detail: string }).detail).toContain('gemini-3.6-flash 到了我们设的上限（每天 1 次）');
+  });
+});
+

@@ -5,7 +5,7 @@ export interface Env {
   /** 密钥（Amos 在 Cloudflare 控制台填）：没填时 /v1/* 全部 404 */
   COPILOT_TOKEN?: string;
   GEMINI_API_KEY?: string;
-  /** 网页后台（待回复清单）的密码，≥ 16 个字符；没填时后台 404（C136） */
+  /** 网页后台（跟帖评论清单）的密码，≥ 16 个字符；没填时后台 404（C136） */
   COPILOT_PASSWORD?: string;
   GEMINI_MODEL?: string;
   /** 备用 AI（Workers AI 绑定，不用密钥）；没有绑定时只用 Gemini */

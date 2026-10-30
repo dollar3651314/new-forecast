@@ -70,8 +70,22 @@ async function api(path, body) {
 // ---- 打分：内容脚本送来的帖子先排队，每 10 秒最多送一批（最多 5 条；10 条一批 Gemini 会超时），Gemini 忙时停 30 秒再继续 ----
 // （2026-10-29 Amos 测试版：滚动几条就报错——每 3 秒一次超过了 Gemini 免费档每分钟的上限）
 const SCORE_EVERY_MS = 10_000;
-/** 75 分以上自动写稿、存进待回复清单（2026-10-30 Amos：超过 75 分的就应该被抓到；手动滑动和自动模式一样） */
-const SAVE_SCORE = 75;
+/**
+ * 每次的上限和进清单的分数（0.3，Amos 2026-10-30 可在设置里调；D-1：只能在 C136 的上限内往下调；D-2：分数 60～95）。
+ * 分数以上自动写稿、存进跟帖评论清单（2026-10-30 Amos：超过 75 分的就应该被抓到；手动滑动和自动模式一样）。
+ * 存在 chrome.storage.local，两个窗口的侧边栏一起生效。
+ */
+const LIM_RANGE = { min: [5, 30, '分钟'], posts: [10, 60, '条'], score: [60, 95, '分'] };
+let lim = { min: 30, posts: 60, score: 75 };
+function limOk(v) { return Object.entries(LIM_RANGE).every(([k, [lo, hi]]) => Number.isInteger(v[k]) && v[k] >= lo && v[k] <= hi); }
+function limView() {
+  $('auto-limit').textContent = `本次最多 ${lim.min} 分钟 / ${lim.posts} 条，到了自动停`;
+  $('m-queued-t').textContent = `进清单（≥ ${lim.score} 分）`;
+  $('empty-score').textContent = lim.score;
+  for (const k of Object.keys(LIM_RANGE)) $('lim-' + k).value = lim[k];
+}
+chrome.storage.local.get('qcLim').then(({ qcLim }) => { if (qcLim && limOk(qcLim)) lim = qcLim; limView(); }).catch(() => limView());
+chrome.storage.onChanged.addListener((ch) => { if (ch.qcLim && ch.qcLim.newValue && limOk(ch.qcLim.newValue)) { lim = ch.qcLim.newValue; limView(); } });
 const saveQ = []; // { tabId, platform, post, score }
 const saveSeen = new Set(); // 已经处理过的帖子（同一条不重复写稿）
 // 手动页的计数（从打开侧边栏算起；2026-10-30 Amos：要看得到抓到了多少条）
@@ -115,7 +129,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 });
 setInterval(async () => {
   if (scoring || Date.now() < pauseUntil || !cfg.relay || !cfg.token) return;
-  // 先把 75 分以上的存进清单，再打下一批（一次只做一件事，不挤占 Gemini 的免费额度）
+  // 先把分数够的存进清单，再打下一批（一次只做一件事，不挤占 Gemini 的免费额度）
   if (saveQ.length) {
     scoring = true;
     const it = saveQ.shift();
@@ -147,12 +161,12 @@ setInterval(async () => {
     man.scored += r.items.length;
     for (const it of r.items) reasons.set(it.id, it.reasons);
     chrome.tabs.sendMessage(first.tabId, { type: 'qc-scores', platform: first.platform, items: r.items }).catch(() => {});
-    for (const it of r.items.filter((x) => x.score >= SAVE_SCORE && !saveSeen.has(x.id))) {
+    for (const it of r.items.filter((x) => x.score >= lim.score && !saveSeen.has(x.id))) {
       const b = batch.find((x) => x.post.id === it.id);
       if (!b) continue;
       saveSeen.add(it.id);
-      saveQ.push({ tabId: b.tabId, platform: b.platform, post: b.post, score: it.score });
-      addLog(`${b.post.author} ${it.score} 分（≥ ${SAVE_SCORE}），排队写稿存进清单`);
+      saveQ.push({ tabId: b.tabId, platform: b.platform, post: b.post, score: it.score, reasons: it.reasons || [] });
+      addLog(`${b.post.author} ${it.score} 分（≥ ${lim.score}），排队写稿存进清单`);
     }
   } catch (e) {
     pending.unshift(...batch); // 没打成分的放回去，下次再送
@@ -168,17 +182,17 @@ setInterval(async () => {
   }
 }, SCORE_EVERY_MS);
 
-/** 写稿 → 第一条通过检查的草稿存进待回复清单 → 页面标记"已存进清单"；没有能用的草稿就记一笔 */
-async function saveToList({ tabId, platform, post, score }) {
+/** 写稿 → 第一条通过检查的草稿存进跟帖评论清单 → 页面标记"已存进清单"；没有能用的草稿就记一笔 */
+async function saveToList({ tabId, platform, post, score, reasons: why = [] }) {
   const d = await api('/v1/draft', { product: cfg.product, platform, post });
   if (!d.drafts.length) {
     // 页面上的标记保持能点，Amos 可以点开换一批（2026-10-30）
     addLog(`${post.author}（${score} 分）没有能用的草稿（都没通过检查），没存；可以点帖子旁的标记手动换一批`, 'warn');
     return false;
   }
-  const q = await api('/v1/queue', { product: cfg.product, platform, post, score, draft: d.drafts[0].text, source: d.drafts[0].source || '', engine: d.drafts[0].engine || 'gemini' });
+  const q = await api('/v1/queue', { product: cfg.product, platform, post, score, reasons: why, draft: d.drafts[0].text, source: d.drafts[0].source || '', engine: d.drafts[0].engine || 'gemini' });
   chrome.tabs.sendMessage(tabId, { type: 'qc-done', id: post.id, text: '副驾驶：已存进清单' }).catch(() => {});
-  addLog(`${post.author}（${score} 分）${q.saved ? '已存进待回复清单' : '清单里已经有了'}${d.drafts[0].engine === 'workers-ai' ? '（备用 AI 写的）' : ''}`);
+  addLog(`${post.author}（${score} 分）${q.saved ? '已存进跟帖评论清单' : '清单里已经有了'}${d.drafts[0].engine === 'workers-ai' ? '（备用 AI 写的）' : ''}`);
   return q.saved;
 }
 
@@ -263,16 +277,16 @@ $('save-q').addEventListener('click', async () => {
   b.disabled = true;
   b.textContent = '正在存…';
   try {
-    const r = await api('/v1/queue', { product: cfg.product, platform: cur.platform, post: cur.post, score: cur.score, draft: d.text, source: d.source || '', engine: d.engine || 'gemini' });
-    say(r.saved ? '已存进待回复清单，在后台点"一键回复"就行。' : '这条之前已经在清单里了。', true);
+    const r = await api('/v1/queue', { product: cfg.product, platform: cur.platform, post: cur.post, score: cur.score, reasons: cur.reasons || [], draft: d.text, source: d.source || '', engine: d.engine || 'gemini' });
+    say(r.saved ? '已存进跟帖评论清单，在后台点"一键回复"就行。' : '这条之前已经在清单里了。', true);
     addLog(`存进清单：${cur.post.author}`);
     chrome.tabs.sendMessage(cur.tabId, { type: 'qc-done', id: cur.post.id, text: '副驾驶：已存进清单' }).catch(() => {});
-    b.textContent = '存进待回复清单（晚点再回）';
+    b.textContent = '存进跟帖评论清单（晚点再回）';
     done();
   } catch (e) {
     say('没存进去：' + e.message);
     b.disabled = false;
-    b.textContent = '存进待回复清单（晚点再回）';
+    b.textContent = '存进跟帖评论清单（晚点再回）';
   }
 });
 $('again').addEventListener('click', async () => {
@@ -310,8 +324,6 @@ async function loadToday() {
 }
 
 // ---- 自动模式（agents C136；状态清单第三节）：侧边栏一步一步驱动页面，每批分析完才滑下一屏 ----
-const AUTO_MAX_MS = 30 * 60_000;
-const AUTO_MAX_POSTS = 60;
 const auto = { on: false, tabId: null, platform: null, started: 0, read: 0, scored: 0, queued: 0 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function autoView(state, kind) {
@@ -363,15 +375,15 @@ async function autoStart() {
 }
 async function autoLoop() {
   while (auto.on) {
-    if (Date.now() - auto.started >= AUTO_MAX_MS) return autoStop('本次已到上限：30 分钟');
-    if (auto.read >= AUTO_MAX_POSTS) return autoStop('本次已到上限：60 条');
+    if (Date.now() - auto.started >= lim.min * 60_000) return autoStop(`本次已到上限：${lim.min} 分钟`);
+    if (auto.read >= lim.posts) return autoStop(`本次已到上限：${lim.posts} 条`);
     autoView('滑动中', 'run');
     let step;
     try { step = await chrome.tabs.sendMessage(auto.tabId, { type: 'qc-auto-step' }); } catch { return autoStop('页面没有回应（可能关掉或刷新了）'); }
     if (!auto.on) return;
     if (!step || step.hidden) return autoStop('切换了分页或窗口，已停');
     if (step.blocked) return autoStop('已停：' + step.blocked + '，请看一眼页面');
-    const posts = step.posts.slice(0, AUTO_MAX_POSTS - auto.read);
+    const posts = step.posts.slice(0, lim.posts - auto.read);
     auto.read += posts.length;
     autoView('等打分结果', 'wait');
     addLog(`自动：这一屏读到 ${posts.length} 条`);
@@ -383,13 +395,13 @@ async function autoLoop() {
       autoView('等打分结果', 'wait');
       chrome.tabs.sendMessage(auto.tabId, { type: 'qc-scores', platform: auto.platform, items: r.items }).catch(() => {});
       addLog(`自动：打分 ${r.items.map((x) => x.score).join('、')}${r.engine === 'workers-ai' ? '（备用 AI）' : ''}`);
-      for (const it of r.items.filter((x) => x.score >= SAVE_SCORE && !saveSeen.has(x.id))) {
+      for (const it of r.items.filter((x) => x.score >= lim.score && !saveSeen.has(x.id))) {
         if (!auto.on) return;
         const post = batch.find((p) => p.id === it.id);
         if (!post) continue;
         saveSeen.add(it.id);
         try {
-          if (await withBusy(() => saveToList({ tabId: auto.tabId, platform: auto.platform, post, score: it.score }))) auto.queued += 1;
+          if (await withBusy(() => saveToList({ tabId: auto.tabId, platform: auto.platform, post, score: it.score, reasons: it.reasons || [] }))) auto.queued += 1;
           autoView('等打分结果', 'wait');
         } catch (e) { saveSeen.delete(it.id); return autoStop('AI 出错：' + e.message); }
       }
@@ -401,6 +413,36 @@ async function autoLoop() {
 $('auto-toggle').addEventListener('click', () => { if (auto.on) autoStop('你关掉了自动模式'); else autoStart(); });
 
 // ---- 设置 ----
+$('lim-save').addEventListener('click', async () => {
+  const b = $('lim-save');
+  const v = {};
+  const bad = [];
+  for (const [k, [lo, hi, u]] of Object.entries(LIM_RANGE)) {
+    const el = $('lim-' + k);
+    v[k] = Number(el.value.trim());
+    const ok = Number.isInteger(v[k]) && v[k] >= lo && v[k] <= hi;
+    el.setAttribute('aria-invalid', String(!ok));
+    if (!ok) bad.push(`${el.parentElement.firstChild.textContent.trim().replace(/（.*$/, '')}要在 ${lo}～${hi} ${u}之间`);
+  }
+  const m = $('lim-msg');
+  if (bad.length) { m.className = 'msg'; m.textContent = '没保存：' + bad.join('；'); return; }
+  b.disabled = true;
+  b.textContent = '正在保存…';
+  try {
+    await chrome.storage.local.set({ qcLim: v });
+    lim = v;
+    limView();
+    m.className = 'msg ok';
+    m.textContent = `✓ 已保存：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单（两个窗口都生效；正在跑的自动模式下一屏起生效）`;
+    addLog(`设置已改：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单`);
+  } catch (e) {
+    m.className = 'msg';
+    m.textContent = '没保存：' + e.message;
+  } finally {
+    b.disabled = false;
+    b.textContent = '保存';
+  }
+});
 $('save').addEventListener('click', async () => {
   // 按下后马上有反馈：按钮变成"正在连接…"并且不能再按；结果写在按钮下面（2026-10-29 Amos：点了没有任何反应）
   const btn = $('save');
