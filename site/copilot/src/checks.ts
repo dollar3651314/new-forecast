@@ -6,7 +6,11 @@ export const BANNED = [
   '稳赚', '穩賺', '必中', '保本', '翻倍', '胜者瓜分', '勝者瓜分', '最后入场', '最後入場', '别错过', '別錯過',
   '智能合约秒出', '智能合約秒出', '输赢全在链上', '輸贏全在鏈上', '链上公开可查', '鏈上公開可查',
   '私房钱', '私房錢',
+  // R-1（Amos 2026-10-30 按市场经理建议）：离下注太近的说法
+  '彩池', '下注', '赔率', '賠率', '投注',
 ];
+/** R-2（Amos 2026-10-30 按市场经理建议）：原帖里没有的夸大结论不能写（AI 曾自己加"資金流入破紀錄"） */
+const SUPERLATIVE = /破[纪紀][录錄]|史上最\S{0,2}|[创創](?:[历歷]史)?新[高低]|[历歷]史新[高低]|有史以[来來]|前所未有/g;
 const PRODUCT = /quick\s*come|quickcome|等候名[单單]|返[奖獎]率/i;
 const LINK = /https?:\/\/|www\.|[a-z0-9-]+\.(com|net|org|online|io|tw|co)\b/i;
 /** 排除的题目：命中就不回（AI 漏判时兜底） */
@@ -28,8 +32,8 @@ export function isExcludedTopic(text: string): boolean {
   return POLITICS.test(text);
 }
 
-/** 返回不通过的原因（空数组 = 通过） */
-export function checkDraft(text: string, platform: Platform): string[] {
+/** 返回不通过的原因（空数组 = 通过）；postText：原帖文字，用来查"原帖没有的结论" */
+export function checkDraft(text: string, platform: Platform, postText = ''): string[] {
   const why: string[] = [];
   const t = text.trim();
   if (!t) why.push('空白');
@@ -37,6 +41,7 @@ export function checkDraft(text: string, platform: Platform): string[] {
   if (PRODUCT.test(t)) why.push('提到了产品');
   if (LINK.test(t)) why.push('有链接');
   if (POLITICS.test(t)) why.push('政治题目');
+  for (const m of new Set(t.match(SUPERLATIVE) ?? [])) if (!postText.includes(m)) why.push(`原帖没有的结论：${m}`);
   if (platform === 'x' ? xLength(t) > 280 : [...t].length > 500) why.push('太长');
   return why;
 }

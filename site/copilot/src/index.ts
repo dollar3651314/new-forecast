@@ -146,7 +146,7 @@ async function draft(env: Env, body: Record<string, unknown>, now: number, origi
   const out = r.data as { drafts?: { tone?: unknown; text?: unknown; source?: unknown }[] };
   const all = (out.drafts ?? []).slice(0, 3).map((d) => ({ tone: str(d.tone, 12) || '回复', text: str(d.text, 600), source: str(d.source, 120), engine: r.engine }));
   // 有阿拉伯数字却没写出处的，也不给（C111：每个数字附来源）
-  const ok = all.filter((d) => checkDraft(d.text, platform).length === 0 && (!/\d/.test(d.text) || d.source));
+  const ok = all.filter((d) => checkDraft(d.text, platform, post.text).length === 0 && (!/\d/.test(d.text) || d.source));
   await logEvent(env, now, { product, platform, postId: post.id, author: post.author, snippet: post.text, action: r.engine === 'gemini' ? 'drafted' : 'drafted-wai', draft: ok.map((d) => d.text).join(' | ') });
   return json({ drafts: ok.slice(0, 2), dropped: all.length - ok.length, engine: r.engine }, 200, origin);
 }
@@ -172,7 +172,7 @@ async function queue(env: Env, body: Record<string, unknown>, now: number, origi
   const post = readPost(body.post);
   const draft = str(body.draft, 600);
   if (!RULES[product] || !platform || !post || !draft) return json({ error: 'bad request' }, 400, origin);
-  const why = checkDraft(draft, platform);
+  const why = checkDraft(draft, platform, post.text);
   if (why.length) return json({ error: 'draft rejected', why }, 422, origin);
   const sc = typeof body.score === 'number' ? Math.max(0, Math.min(100, Math.round(body.score))) : null;
   const r = await saveToQueue(env, now, { product, platform, postId: post.id, author: post.author, text: post.text, ageMinutes: post.ageMinutes, score: sc, draft, source: str(body.source, 120), engine: body.engine === 'workers-ai' ? 'workers-ai' : 'gemini' });
