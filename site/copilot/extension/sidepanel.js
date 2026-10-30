@@ -73,7 +73,8 @@ const SCORE_EVERY_MS = 10_000;
 /**
  * 每次的上限和进清单的分数（0.3，Amos 2026-10-30 可在设置里调；D-1：只能在 C136 的上限内往下调；D-2：分数 60～95）。
  * 分数以上自动写稿、存进跟帖评论清单（2026-10-30 Amos：超过 75 分的就应该被抓到；手动滑动和自动模式一样）。
- * 存在 chrome.storage.local，两个窗口的侧边栏一起生效。
+ * 每个窗口的侧边栏各用各的（2026-10-30 Amos：第一个窗口设 80 分、第二个设 70 分，第一个却存了 75 分的）；
+ * 保存时也记进 chrome.storage.local，只当"新打开的侧边栏"的初始值，不会改到已经开着的别的窗口。
  */
 const LIM_RANGE = { min: [5, 30, '分钟'], posts: [10, 60, '条'], score: [60, 95, '分'] };
 let lim = { min: 30, posts: 60, score: 75 };
@@ -85,7 +86,6 @@ function limView() {
   for (const k of Object.keys(LIM_RANGE)) $('lim-' + k).value = lim[k];
 }
 chrome.storage.local.get('qcLim').then(({ qcLim }) => { if (qcLim && limOk(qcLim)) lim = qcLim; limView(); }).catch(() => limView());
-chrome.storage.onChanged.addListener((ch) => { if (ch.qcLim && ch.qcLim.newValue && limOk(ch.qcLim.newValue)) { lim = ch.qcLim.newValue; limView(); } });
 const saveQ = []; // { tabId, platform, post, score }
 const saveSeen = new Set(); // 已经处理过的帖子（同一条不重复写稿）
 // 手动页的计数（从打开侧边栏算起；2026-10-30 Amos：要看得到抓到了多少条）
@@ -474,7 +474,7 @@ $('lim-save').addEventListener('click', async () => {
     lim = v;
     limView();
     m.className = 'msg ok';
-    m.textContent = `✓ 已保存：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单（两个窗口都生效；正在跑的自动模式下一屏起生效）`;
+    m.textContent = `✓ 已保存：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单（只对这个窗口生效，另一个窗口不受影响；正在跑的自动模式下一屏起生效）`;
     addLog(`设置已改：${v.min} 分钟 / ${v.posts} 条 / ${v.score} 分以上进清单`);
   } catch (e) {
     m.className = 'msg';
