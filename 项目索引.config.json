@@ -34,7 +34,6 @@
       "section": "5. 环境变量",
       "sources": [
         "site/worker/src/",
-        "site/copilot/src/",
         "site/scripts/",
         ".github/workflows/"
       ],
@@ -53,8 +52,7 @@
       "name": "数据库表",
       "section": "4.1",
       "sources": [
-        "site/migrations/",
-        "site/copilot/migrations/"
+        "site/migrations/"
       ],
       "patterns": [
         "CREATE TABLE (?:IF NOT EXISTS )?(\\w+)"

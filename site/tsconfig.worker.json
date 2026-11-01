@@ -14,5 +14,5 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true
   },
-  "include": ["worker/src", "shared", "copilot/src", "copilot/rules"]
+  "include": ["worker/src", "shared"]
 }

@@ -9,7 +9,7 @@
     "test": "vitest run",
     "build": "vite build",
     "check-dist": "node scripts/check-dist.mjs",
-    "dry-run": "wrangler deploy --dry-run --env= --outdir .wrangler/dry-run && wrangler deploy --dry-run --env=staging --outdir .wrangler/dry-run-staging && wrangler deploy --dry-run -c copilot/wrangler.toml --env= --outdir .wrangler/dry-run-copilot && wrangler deploy --dry-run -c copilot/wrangler.toml --env=staging --outdir .wrangler/dry-run-copilot-staging",
+    "dry-run": "wrangler deploy --dry-run --env= --outdir .wrangler/dry-run && wrangler deploy --dry-run --env=staging --outdir .wrangler/dry-run-staging",
     "dev": "wrangler dev --test-scheduled",
     "e2e": "node scripts/e2e-local.mjs",
     "og": "node scripts/render-og.mjs"
