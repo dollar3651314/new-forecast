@@ -1,0 +1,40 @@
+# 公司运营仪表盘上报（agents 产品/marketing/技术方案-运营仪表盘.md 第二、五节）：把本仓库的【要你决定】PR 和 main 的 CI / 最近部署
+# 推到 Marketing 的 /api/company/ingest。脚本 scripts/company-report.mjs（new-forecast、Marketing 两个仓库内容相同，只是 COMPANY_SOURCE 不同）。
+#   - 只在推送到 main、PR 开 / 关 / 重开 / 改标题、main 的 CI（ci.yml，name: ci）跑完时运行；都是事件触发，不设定时任务（Amos B-6）。
+#     CI 跑完再报一次（Amos 2026-11-01）：push 时 CI 多半还在跑，报的是"运行中"；CI 跑完触发 workflow_run，再读一次就是最终结论。
+#   - 没填 GitHub Secret COMPANY_INGEST_TOKEN 时打印"跳过"并成功（C103）；来自 fork 的 PR 拿不到 Secret，同样跳过。
+#   - 和 ci.yml 分开：上报失败不影响 PR 检查和部署。
+#   - 同一时间只留最新一次（每次都报完整状态，旧的取消也不丢数据），也让每分钟上报次数远低于接口上限 6 次。
+name: company
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, closed, reopened, edited]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+concurrency:
+  group: company
+  cancel-in-progress: true
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: 上报 PR 和 CI 到公司运营仪表盘
+        env:
+          COMPANY_SOURCE: new-forecast
+          COMPANY_INGEST_TOKEN: ${{ secrets.COMPANY_INGEST_TOKEN }}
+          COMPANY_INGEST_URL: ${{ vars.COMPANY_INGEST_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/company-report.mjs

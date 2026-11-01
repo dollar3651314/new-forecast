@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       full: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ci == 'true' }}
@@ -35,10 +35,12 @@ jobs:
               - '.github/workflows/**'
             site:
               - 'site/**'
+              # 上报脚本的单元测试在 site/test/shared/company-report.test.ts，改脚本也要跑
+              - 'scripts/company-report.mjs'
 
   # 基本检查：每次都跑
   basic:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -58,7 +60,7 @@ jobs:
   site:
     needs: changes
     if: needs.changes.outputs.full == 'true' || needs.changes.outputs.site == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -75,7 +77,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: 类型检查
         run: npm run typecheck
-      - name: 测试（Worker 接口、看板换源和超时、页面组件、三语文案、共用规则、脚本）
+      - name: 测试（Worker 接口、看板换源和超时、页面组件、三语文案、共用规则、脚本、副驾驶中转服务和插件）
         run: npm test
       - name: 构建
         run: npm run build
@@ -90,7 +92,7 @@ jobs:
   site-e2e:
     needs: changes
     if: needs.changes.outputs.full == 'true' || needs.changes.outputs.site == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -119,7 +121,7 @@ jobs:
   ci-ok:
     needs: [changes, basic, site, site-e2e]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: 汇总结果
@@ -134,7 +136,7 @@ jobs:
   deploy:
     needs: [ci-ok, site]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main') && needs.ci-ok.result == 'success' && needs.site.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:

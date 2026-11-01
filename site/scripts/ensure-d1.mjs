@@ -6,6 +6,7 @@
  * 之后 scripts/deploy.sh 用这个配置执行迁移（只执行没执行过的）和部署。
  * 需要环境变量 CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID（GitHub Secrets）；令牌要有 D1 Edit 权限。输出里没有密钥。
  * 用法：node scripts/ensure-d1.mjs --env staging|production
+ * （副驾驶的 --app copilot 2026-10-30 随代码搬到 Marketing 仓库）
  * 参照：forecast main 0caa740 cf/scripts/ensure-d1.mjs。
  */
 import { execFileSync } from 'node:child_process';
@@ -14,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const DB_NAMES = { production: 'new-forecast-site', staging: 'new-forecast-site-staging' };
+export const APPS = { site: { names: DB_NAMES, dir: '.' } };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** 把 database_name = "<name>" 那一段的 database_id 换成 uuid；找不到或不止一处时报错（配置被改坏了，宁可停下） */
@@ -42,7 +44,9 @@ function main() {
   const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const i = process.argv.indexOf('--env');
   const env = i > 0 ? process.argv[i + 1] : '';
-  const name = DB_NAMES[env];
+  const j = process.argv.indexOf('--app');
+  const app = APPS[j > 0 ? process.argv[j + 1] : 'site'];
+  const name = app?.names[env];
   if (!name) {
     console.error('用法：node scripts/ensure-d1.mjs --env staging|production');
     process.exit(2);
@@ -56,9 +60,10 @@ function main() {
     if (!db) throw new Error(`新建 D1 ${name} 以后还是查不到`);
     console.log(`✓ 新建 D1 ${name}（位置提示 apac）`);
   }
-  const toml = readFileSync(path.join(site, 'wrangler.toml'), 'utf8');
-  writeFileSync(path.join(site, 'wrangler.deploy.toml'), patchConfig(toml, name, db.uuid));
-  console.log(`✓ 本次部署的配置 wrangler.deploy.toml 已写好（D1 编号 ${db.uuid.slice(0, 8)}…）`);
+  const dir = path.join(site, app.dir);
+  const toml = readFileSync(path.join(dir, 'wrangler.toml'), 'utf8');
+  writeFileSync(path.join(dir, 'wrangler.deploy.toml'), patchConfig(toml, name, db.uuid));
+  console.log(`✓ 本次部署的配置 ${path.join(app.dir, 'wrangler.deploy.toml')} 已写好（D1 编号 ${db.uuid.slice(0, 8)}…）`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
