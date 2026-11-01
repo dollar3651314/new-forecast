@@ -8,7 +8,7 @@
   ],
   "external": [
     {
-      "_说明": "内部文档（需求单、技术方案、调研、Amos 待办）在 agents 仓库的 产品/forecast/（agents 规则 C119），索引里写成 `agents/产品/forecast/…`",
+      "_说明": "内部文档（需求单、技术方案、调研、Amos 待办）在 agents 仓库的 项目/forecast/（agents 规则 C119），索引里写成 `agents/项目/forecast/…`",
       "prefix": "agents/",
       "repo": "dollar3651314/agents"
     }
