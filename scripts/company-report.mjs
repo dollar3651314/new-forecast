@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 公司运营仪表盘的上报脚本（agents 产品/marketing/技术方案-运营仪表盘.md 第二、五节；PR 5 new-forecast、PR 6 Marketing）。
+// 公司运营仪表盘的上报脚本（agents 公司平台/技术方案-运营仪表盘.md 第二、五节；PR 5 new-forecast、PR 6 Marketing）。
 // 不依赖任何库，Node 22。new-forecast 和 Marketing 两个仓库里内容完全相同，只用环境变量 COMPANY_SOURCE 区分。
 // 由 .github/workflows/company.yml 在推送到 main、PR 开 / 关 / 重开 / 改标题时运行；不设定时任务（Amos B-6）。
 //
