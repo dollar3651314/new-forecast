@@ -4,7 +4,8 @@
 // 由 .github/workflows/company.yml 在推送到 main、PR 开 / 关 / 重开 / 改标题时运行；不设定时任务（Amos B-6）。
 //
 // 做的事：用 Actions 自带的 GITHUB_TOKEN（本机 --dry-run 没有时匿名读，只适用公开仓库）读本仓库（GITHUB_REPOSITORY）——
-//   ① 标题含【要你决定】的 open PR → {kind:'prs', key:'', payload:{items:[{number,title,url,days}]}}
+//   ① 标题含【要你决定】的 open PR → {kind:'prs', key:'', payload:{items:[{number,title,url,days,body?,body_cut?,questions?}]}}
+//      （公司平台批 2：body = PR 说明正文，≤ BODY_MAX 字，所有正文合计 ≤ BODY_BUDGET 字节，截过的标 body_cut；questions = 正文里"问题 / 建议"表）
 //   ② main 最近一次 CI（COMPANY_CI_WORKFLOW，默认 ci.yml）的结论和链接；最近一次 deploy job（COMPANY_DEPLOY_JOB，默认 deploy）
 //      成功的那次运行的提交号和完成时间 → {kind:'ci', key:'', payload:{conclusion,url,sha,at,note}}
 //      （页面"最近部署"一列显示 sha · at；main 最近一次 CI 的提交号和时间写在 note 里）
@@ -45,13 +46,68 @@ function ghClient(env, fetchImpl) {
   };
 }
 
-/** 含【要你决定】的 open PR */
+// ---- 公司平台批 2：PR 说明正文和问题表（页面在当前页展开，不跳 GitHub；Amos 2026-11-02） ----
+/** 正文最多多少字（和 Marketing src/company.ts BODY_MAX 一样；服务端超长也只截断并标记，不报错） */
+export const BODY_MAX = 4000;
+/** 所有 PR 的正文加起来最多多少字节（服务端整份上限 256 KB，超了整份 413；留出标题、CI 块的余量） */
+export const BODY_BUDGET = 160 * 1024;
+const Q_MAX = 20;
+const Q_CELL = 500;
+
+/** 截到 n 个 UTF-16 单位以内，不把一个字（代理对）切成两半 */
+const cutUnits = (s, n) => { if (s.length <= n) return s; let t = s.slice(0, n); if (/[\ud800-\udbff]$/.test(t)) t = t.slice(0, -1); return t; };
+/** 截到 n 个字节（UTF-8）以内 */
+function cutBytes(s, n) {
+  if (Buffer.byteLength(s) <= n) return s;
+  let lo = 0, hi = s.length;
+  while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (Buffer.byteLength(cutUnits(s, mid)) <= n) lo = mid; else hi = mid - 1; }
+  return cutUnits(s, lo);
+}
+
+/** 正文里"问题 / 建议"两列的 Markdown 表 → [{q, advice}]（≤ 20 条，每格 ≤ 500 字）；没有这样的表返回 [] */
+export function parseQuestions(md) {
+  const out = [];
+  const lines = String(md ?? '').split(/\r?\n/);
+  const cells = (l) => { let t = l.trim(); if (t.startsWith('|')) t = t.slice(1); if (t.endsWith('|')) t = t.slice(0, -1); return t.split('|').map((c) => c.trim()); };
+  const plain = (c) => c.replace(/\*\*/g, '').replace(/`/g, '').trim();
+  for (let i = 0; i + 1 < lines.length && out.length < Q_MAX; i++) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) continue;
+    const head = cells(lines[i]).map(plain);
+    const qi = head.findIndex((h) => h.includes('问题')), ai = head.findIndex((h) => h.includes('建议'));
+    if (qi < 0 || ai < 0) continue;
+    for (let j = i + 2; j < lines.length && /^\s*\|/.test(lines[j]) && out.length < Q_MAX; j++) {
+      const c = cells(lines[j]);
+      const q = plain(c[qi] ?? ''), advice = plain(c[ai] ?? '');
+      if (q) out.push({ q: cutUnits(q, Q_CELL), advice: cutUnits(advice, Q_CELL) });
+    }
+  }
+  return out;
+}
+
+/** 给 PR 条目加 body / body_cut / questions：每条 ≤ BODY_MAX 字；所有正文加起来 ≤ BODY_BUDGET 字节（平均分，超了就截得更短，仍标 body_cut） */
+export function withBodies(items, pulls) {
+  const bodies = pulls.map((p) => (typeof p.body === 'string' && p.body.trim() ? p.body : ''));
+  const n = bodies.filter(Boolean).length;
+  const share = n ? Math.floor(BODY_BUDGET / n) : 0;
+  return items.map((it, i) => {
+    const raw = bodies[i];
+    if (!raw) return it;
+    const out = { ...it };
+    let body = cutBytes(cutUnits(raw, BODY_MAX), share);
+    if (body.length < raw.length) out.body_cut = true;
+    if (body) out.body = body;
+    const qs = parseQuestions(raw);
+    if (qs.length) out.questions = qs;
+    return out;
+  });
+}
+
+/** 含【要你决定】的 open PR（批 2：带说明正文和问题表） */
 export async function prsBlock(get, repo, now) {
   const list = await get(`/repos/${repo}/pulls?state=open&per_page=100&sort=created&direction=asc`);
-  const items = list
-    .filter((p) => typeof p.title === 'string' && p.title.includes(DECIDE))
-    .map((p) => ({ number: p.number, title: p.title.slice(0, 200), url: p.html_url, days: Math.max(0, Math.floor((now - Date.parse(p.created_at)) / DAY_MS)) }));
-  return { kind: 'prs', key: '', payload: { items }, source_at: now };
+  const pulls = list.filter((p) => typeof p.title === 'string' && p.title.includes(DECIDE));
+  const items = pulls.map((p) => ({ number: p.number, title: p.title.slice(0, 200), url: p.html_url, days: Math.max(0, Math.floor((now - Date.parse(p.created_at)) / DAY_MS)) }));
+  return { kind: 'prs', key: '', payload: { items: withBodies(items, pulls) }, source_at: now };
 }
 
 /** main 最近一次 CI + 最近一次部署成功 */
