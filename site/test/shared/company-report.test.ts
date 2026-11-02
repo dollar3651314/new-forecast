@@ -178,3 +178,48 @@ describe('上报', () => {
     expect(q.error).toHaveBeenCalledWith(expect.stringContaining('COMPANY_SOURCE'));
   });
 });
+
+// 批 2 追加（Amos 2026-11-02："看待办 加载的不就是文字吗"）：上报 PR 时带上说明正文和问题表，页面直接展开，不跳 GitHub。
+// 约定（测试先提；研发要改名就同一个 PR 改这里）：脚本导出 BODY_MAX = 4000；PR 有说明正文时 item 带 body（纯文字，≤ BODY_MAX 字），
+// 超过时截到上限并带 body_cut: true；正文里有"问题 / 建议"两列的表时带 questions: [{q, advice}]（≤ 20 条）；PR 没写说明时不带 body。
+// 整份上报（JSON）不超过 256 KB（服务端上限，超了整份 413）：PR 多、正文长时后面的正文截得更短，仍标 body_cut。
+describe('批 2 追加：PR 说明正文和问题表', () => {
+  const BODY = ['这次改首页文案。', '', '| # | 问题 | 建议 |', '|---|---|---|', '| 1 | 要不要换主标题？ | 建议换，转化更好 |', '| 2 | 什么时候上线？ | 建议周三晚上 |', '', '<script>alert(1)</script> 原样保留'].join('\n');
+  const withBody = (body: string | null, n = 7) => ({ ...PULLS[0], number: n, html_url: `https://github.com/${REPO}/pull/${n}`, body });
+  const prItems = async (pulls: unknown[]) => {
+    const { fn } = fakeFetch({ pulls: pulls as typeof PULLS });
+    const r = await buildReport({ env: ENV, fetch: fn, now: NOW });
+    return { items: r.blocks[0].payload.items as Record<string, unknown>[], report: r };
+  };
+
+  it('PR 的说明正文放进 body（原样纯文字，HTML 不删不转义）；问题表变成 questions，每条带建议', async () => {
+    // @ts-expect-error 脚本是 .mjs，没有类型
+    const mod = (await import('../../../scripts/company-report.mjs')) as { BODY_MAX?: number };
+    expect(mod.BODY_MAX).toBe(4000);
+    const { items } = await prItems([withBody(BODY)]);
+    expect(items[0].body).toBe(BODY);
+    expect(items[0].body_cut).toBeUndefined();
+    expect(items[0].questions).toEqual([{ q: '要不要换主标题？', advice: '建议换，转化更好' }, { q: '什么时候上线？', advice: '建议周三晚上' }]);
+  });
+
+  it('PR 没写说明（body 是 null 或空）：不带 body、questions', async () => {
+    const { items } = await prItems([withBody(null), withBody('   ', 9)]);
+    for (const it of items) { expect(it.body).toBeUndefined(); expect(it.questions).toBeUndefined(); }
+  });
+
+  it('正文超过 4000 字：截到 4000 字以内并标 body_cut: true', async () => {
+    const { items } = await prItems([withBody('长'.repeat(9000))]);
+    expect(typeof items[0].body).toBe('string');
+    expect((items[0].body as string).length).toBeLessThanOrEqual(4000);
+    expect((items[0].body as string).length).toBeGreaterThan(1000);
+    expect(items[0].body_cut).toBe(true);
+  });
+
+  it('100 个 PR、每个正文 9000 字：整份上报仍 ≤ 256 KB，被截的都标 body_cut', async () => {
+    const { items, report } = await prItems(Array.from({ length: 100 }, (_, i) => withBody('正文'.repeat(4500), 100 + i)));
+    expect(items).toHaveLength(100);
+    expect(Buffer.byteLength(JSON.stringify(report))).toBeLessThanOrEqual(256 * 1024);
+    for (const it of items) { if (it.body !== undefined) expect(it.body_cut).toBe(true); }
+    expect(items.filter((it) => typeof it.body === 'string' && (it.body as string).length > 0).length).toBeGreaterThan(0);
+  });
+});
