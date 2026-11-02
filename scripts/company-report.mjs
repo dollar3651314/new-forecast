@@ -4,7 +4,8 @@
 // 由 .github/workflows/company.yml 在推送到 main、PR 开 / 关 / 重开 / 改标题时运行；不设定时任务（Amos B-6）。
 //
 // 做的事：用 Actions 自带的 GITHUB_TOKEN（本机 --dry-run 没有时匿名读，只适用公开仓库）读本仓库（GITHUB_REPOSITORY）——
-//   ① 标题含【要你决定】的 open PR → {kind:'prs', key:'', payload:{items:[{number,title,url,days}]}}
+//   ① 标题含【要你决定】的 open PR、外部人提交的 open PR → {kind:'prs', key:'', payload:{items:[{number,title,url,days,tag?,external?}]}}
+//      （公司平台批 2 新口径：代码仓库不带 PR 说明正文和问题表——只有 agents 才是公司，正文只认 agents）
 //   ② main 最近一次 CI（COMPANY_CI_WORKFLOW，默认 ci.yml）的结论和链接；最近一次 deploy job（COMPANY_DEPLOY_JOB，默认 deploy）
 //      成功的那次运行的提交号和完成时间 → {kind:'ci', key:'', payload:{conclusion,url,sha,at,note}}
 //      （页面"最近部署"一列显示 sha · at；main 最近一次 CI 的提交号和时间写在 note 里）
@@ -45,12 +46,26 @@ function ghClient(env, fetchImpl) {
   };
 }
 
-/** 含【要你决定】的 open PR */
+// ---- 公司平台批 2 新口径（Amos 2026-11-02："只有agents才是公司，其他都只是项目代码文件夹……如果真有人提交了，只需要给我看就好"） ----
+// 代码仓库只报 PR 的标题、链接、开了几天、tag，不带说明正文和问题表；外部人提交的标 external: true，标题里没有【要你决定】也报（给 Amos 看一眼）。
+const OWN_ASSOC = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+/** 外部人提交：author_association 不是 OWNER / MEMBER / COLLABORATOR（没写也算），或来自 fork（head 仓库和 base 不同，head 仓库没了也算） */
+export function isExternal(p) {
+  const head = p?.head?.repo?.full_name, base = p?.base?.repo?.full_name;
+  const fork = p?.head !== undefined && (!head || (base !== undefined && head !== base));
+  return !OWN_ASSOC.includes(p?.author_association) || fork;
+}
+
+/** 含【要你决定】的 open PR + 外部人提交的 open PR；只报 number、title、url、days、tag（decide）、external */
 export async function prsBlock(get, repo, now) {
   const list = await get(`/repos/${repo}/pulls?state=open&per_page=100&sort=created&direction=asc`);
   const items = list
-    .filter((p) => typeof p.title === 'string' && p.title.includes(DECIDE))
-    .map((p) => ({ number: p.number, title: p.title.slice(0, 200), url: p.html_url, days: Math.max(0, Math.floor((now - Date.parse(p.created_at)) / DAY_MS)) }));
+    .filter((p) => typeof p.title === 'string' && (p.title.includes(DECIDE) || isExternal(p)))
+    .map((p) => ({
+      number: p.number, title: p.title.slice(0, 200), url: p.html_url, days: Math.max(0, Math.floor((now - Date.parse(p.created_at)) / DAY_MS)),
+      ...(p.title.includes(DECIDE) ? { tag: 'decide' } : {}),
+      ...(isExternal(p) ? { external: true } : {}),
+    }));
   return { kind: 'prs', key: '', payload: { items }, source_at: now };
 }
 
