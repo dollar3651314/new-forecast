@@ -3,7 +3,7 @@
 // 用法：在项目根目录执行  node scripts/check-project-index.mjs  （配置文件默认是根目录的 项目索引.config.json）
 // 新项目：把本文件原样复制到项目的 scripts/ 下，再按 agents/模板/项目索引.config.json 写配置。
 // 不要在项目里修改本文件；要改进，改 agents 仓库里的这一份，再复制过去（文件头的版本号会变）。
-// 版本：v2（2026-10-27，agents C96：支持 external，私有仓库里的文件不算缺失）；v1（2026-10-01）
+// 版本：v3（2026-11-02，agents C147：⑥ 禁放文件）；v2（2026-10-27，agents C96：支持 external，私有仓库里的文件不算缺失）；v1（2026-10-01）
 //
 // 检查的内容：
 //   ① 入口文件（CLAUDE.md、AGENTS.md）存在，并指向项目地图；项目地图指向项目索引
@@ -13,6 +13,9 @@
 //      twoWay 为 true 时，章节第一列里写到的名字也必须还在代码里出现（防止写了已经删除的）
 //   ⑤ external（v2，C96）：内部文档放在别的仓库（例如私有仓库 <项目>-private）时，索引里写成 `<前缀>路径`（例如 `forecast-private/Amos待办.md`），
 //      这些路径不在本仓库检查是否存在；项目地图和项目索引都必须提到这个仓库（前缀或 repo 名），保证新来的人知道去哪里找
+//   ⑥ 禁放文件（v3，C147）：公司资料只放 agents，代码仓库里（git 跟踪的 + 新建还没提交的）文件路径命中 FORBIDDEN 就报错；
+//      不带 / 的名字在路径里出现就算，带 / 的名字要是一整段文件夹；代码确实要用的，在配置 forbidden.allow 里写路径（可用 * 和 **）。
+//      只看文件名，拦不住写在文件里的内容
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -28,6 +31,8 @@ const external = (cfg.external || []).map((e) => (typeof e === 'string' ? { pref
 const isExternal = (t) => external.some((e) => t.startsWith(e.prefix));
 let scope = [];
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
+// ⑥ 禁放的名字（agents v0.35 修改建议第六节）
+const FORBIDDEN = ['Amos待办', '待办', '计划', '进度', '交接记录', '状态卡', '开发记录', '决定记录', '需求文档/', '市场/', '交付记录/', '测试报告/'];
 
 // ① 入口
 for (const f of [MAP, INDEX, ...(cfg.entry || ['CLAUDE.md', 'AGENTS.md'])]) if (!existsSync(join(ROOT, f))) problems.push(`缺少文件：${f}`);
@@ -53,6 +58,14 @@ const glob = (p) => new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').repl
 const inc = (cfg.files?.include || []).map(glob), exc = (cfg.files?.exclude || []).map(glob);
 scope = files.filter((f) => inc.some((r) => r.test(f)) && !exc.some((r) => r.test(f)));
 for (const f of scope) if (!written.has(f)) problems.push(`没有写进索引的文件：${f}`);
+
+// ⑥ 禁放文件
+const allow = (cfg.forbidden?.allow || []).map(glob);
+for (const f of files) {
+  if (allow.some((r) => r.test(f))) continue;
+  const hit = FORBIDDEN.find((n) => (n.endsWith('/') ? `/${f}`.includes(`/${n}`) : f.includes(n)));
+  if (hit) problems.push(`禁放文件：${f} 命中"${hit}"（公司资料只放 agents，C147；确实是代码要用的，写进配置 forbidden.allow）`);
+}
 
 // ③ 写到的路径都存在
 const dirs = new Set(files.map((f) => f.split('/')[0]).filter((d) => files.some((f) => f.startsWith(`${d}/`))));
