@@ -1,4 +1,4 @@
-# Quick Come 官网 / 等候页 / 名单页 v1 的 Cloudflare Worker（Workers 静态资源 + D1 + Cron）。技术方案：agents 产品/forecast/架构方案/v1-官网技术方案.md。
+# Quick Come 官网 / 等候页 / 名单页 v1 的 Cloudflare Worker（Workers 静态资源 + D1 + Cron）。技术方案：agents 项目/forecast/BC-可行性预热/官网技术方案.md。
 # 顶层是正式版（new-forecast-site），[env.staging] 是测试版（new-forecast-site-staging）。环境里的绑定、变量、Cron 不继承顶层，每个环境都写全（Cloudflare 规范 K5）。
 # - 密钥不写在这里：RESEND_API_KEY、ADMIN_PASSWORD、ADMIN_PATH（名单页的地址）由 Amos 在控制台 Settings → Variables and Secrets 填（K2）。keep_vars = true：部署时不删控制台里填的。
 # - D1 的 database_id 不写在这里：部署前由 scripts/ensure-d1.mjs 按名字查（没有就建），写进本次部署用的临时配置 wrangler.deploy.toml；本机 wrangler dev 用本地 D1。
