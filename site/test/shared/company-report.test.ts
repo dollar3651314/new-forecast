@@ -66,8 +66,9 @@ describe('组成 blocks', () => {
       source: SOURCE,
       blocks: [
         { kind: 'prs', key: '', source_at: NOW, payload: { items: [
-          { number: 7, title: '【要你决定】换首页文案', url: `https://github.com/${REPO}/pull/7`, days: 3 },
-          { number: 9, title: '加公司页【要你决定】', url: `https://github.com/${REPO}/pull/9`, days: 0 },
+          // 批 2 新口径加了 tag（【要你决定】= decide）：研发同步更新这条逐字比对，测试会话已同意
+          { number: 7, title: '【要你决定】换首页文案', url: `https://github.com/${REPO}/pull/7`, days: 3, tag: 'decide' },
+          { number: 9, title: '加公司页【要你决定】', url: `https://github.com/${REPO}/pull/9`, days: 0, tag: 'decide' },
         ] } },
         { kind: 'ci', key: '', source_at: NOW, payload: {
           conclusion: 'running', url: `https://github.com/${REPO}/actions/runs/105`,
