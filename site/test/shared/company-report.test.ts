@@ -14,10 +14,12 @@ const DAY = 24 * 3600_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const ok = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 
+// 本仓库成员开的、不是 fork 的 PR（批 2 加 external 以后要写明来源；测试数据补齐，原断言不变）
+const OWN = { author_association: 'OWNER', head: { repo: { full_name: REPO } }, base: { repo: { full_name: REPO } } };
 const PULLS = [
-  { number: 7, title: '【要你决定】换首页文案', html_url: `https://github.com/${REPO}/pull/7`, created_at: iso(NOW - 3 * DAY - 3600_000) },
-  { number: 8, title: '修一个错别字', html_url: `https://github.com/${REPO}/pull/8`, created_at: iso(NOW - DAY) },
-  { number: 9, title: '加公司页【要你决定】', html_url: `https://github.com/${REPO}/pull/9`, created_at: iso(NOW - 3600_000) },
+  { number: 7, title: '【要你决定】换首页文案', html_url: `https://github.com/${REPO}/pull/7`, created_at: iso(NOW - 3 * DAY - 3600_000), ...OWN },
+  { number: 8, title: '修一个错别字', html_url: `https://github.com/${REPO}/pull/8`, created_at: iso(NOW - DAY), ...OWN },
+  { number: 9, title: '加公司页【要你决定】', html_url: `https://github.com/${REPO}/pull/9`, created_at: iso(NOW - 3600_000), ...OWN },
 ];
 const run = (id: number, sha: string, status: string, conclusion: string | null, at: number, extra: Record<string, unknown> = {}) => ({
   id, head_sha: sha.padEnd(40, '0'), head_branch: 'main', event: 'push', status, conclusion, html_url: `https://github.com/${REPO}/actions/runs/${id}`, run_started_at: iso(at), created_at: iso(at), updated_at: iso(at + 600_000), ...extra,
@@ -179,47 +181,54 @@ describe('上报', () => {
   });
 });
 
-// 批 2 追加（Amos 2026-11-02："看待办 加载的不就是文字吗"）：上报 PR 时带上说明正文和问题表，页面直接展开，不跳 GitHub。
-// 约定（测试先提；研发要改名就同一个 PR 改这里）：脚本导出 BODY_MAX = 4000；PR 有说明正文时 item 带 body（纯文字，≤ BODY_MAX 字），
-// 超过时截到上限并带 body_cut: true；正文里有"问题 / 建议"两列的表时带 questions: [{q, advice}]（≤ 20 条）；PR 没写说明时不带 body。
-// 整份上报（JSON）不超过 256 KB（服务端上限，超了整份 413）：PR 多、正文长时后面的正文截得更短，仍标 body_cut。
-describe('批 2 追加：PR 说明正文和问题表', () => {
-  const BODY = ['这次改首页文案。', '', '| # | 问题 | 建议 |', '|---|---|---|', '| 1 | 要不要换主标题？ | 建议换，转化更好 |', '| 2 | 什么时候上线？ | 建议周三晚上 |', '', '<script>alert(1)</script> 原样保留'].join('\n');
-  const withBody = (body: string | null, n = 7) => ({ ...PULLS[0], number: n, html_url: `https://github.com/${REPO}/pull/${n}`, body });
-  const prItems = async (pulls: unknown[]) => {
-    const { fn } = fakeFetch({ pulls: pulls as typeof PULLS });
-    const r = await buildReport({ env: ENV, fetch: fn, now: NOW });
-    return { items: r.blocks[0].payload.items as Record<string, unknown>[], report: r };
-  };
+// 批 2 新口径（Amos 2026-11-02："只有agents才是公司，其他都只是项目代码文件夹……其他项目内不保留这些资料也不认被其他人提交上来的东西。如果真有人提交了，只需要给我看就好"）
+// 代码仓库的上报脚本完全不带正文：PR 只报 number、title、url、days、tag，外部人提交的再加 external: true。
+// external 规则：author_association 不是 OWNER / MEMBER / COLLABORATOR，或 PR 来自 fork（head.repo.full_name ≠ base.repo.full_name，head.repo 为空也算）。
+// 测试先写：脚本现在还带 body / questions，也没有 external，下面几条现在是红的。
+describe('批 2 新口径：代码仓库只报 PR 标题，不带正文；外部提交标 external', () => {
+  const LEAK = ['说明正文', '', '| # | 问题 | 建议 |', '|---|---|---|', '| 1 | 要不要换 Key AIzaSyD-FAKEfake0123456789abcdefghijklm？ | 建议换 |'].join('\n');
+  const pull = (n: number, over: Record<string, unknown> = {}) => ({ number: n, title: `【要你决定】样例 ${n}`, html_url: `https://github.com/${REPO}/pull/${n}`, created_at: iso(NOW - DAY), body: LEAK, ...OWN, ...over });
+  async function sent(pulls: unknown[]) {
+    const { fn, posts } = fakeFetch({ pulls: pulls as typeof PULLS });
+    const code = await main({ argv: [], env: ENV, fetch: fn, now: NOW, ...quiet() });
+    return { code, text: posts.length ? String(posts[posts.length - 1].init.body) : '' };
+  }
+  const ALLOWED = ['days', 'external', 'number', 'tag', 'title', 'url'];
 
-  it('PR 的说明正文放进 body（原样纯文字，HTML 不删不转义）；问题表变成 questions，每条带建议', async () => {
-    // @ts-expect-error 脚本是 .mjs，没有类型
-    const mod = (await import('../../../scripts/company-report.mjs')) as { BODY_MAX?: number };
-    expect(mod.BODY_MAX).toBe(4000);
-    const { items } = await prItems([withBody(BODY)]);
-    expect(items[0].body).toBe(BODY);
-    expect(items[0].body_cut).toBeUndefined();
-    expect(items[0].questions).toEqual([{ q: '要不要换主标题？', advice: '建议换，转化更好' }, { q: '什么时候上线？', advice: '建议周三晚上' }]);
+  it('PR 写了说明正文和问题表：发出去的 JSON 里没有 body、body_cut、questions，也没有正文里的任何文字', async () => {
+    const { code, text } = await sent([pull(1), pull(2, { body: '长'.repeat(9000) })]);
+    expect(code).toBe(0);
+    const items = JSON.parse(text).blocks[0].payload.items as Record<string, unknown>[];
+    expect(items.map((x) => x.number)).toEqual([1, 2]);
+    for (const it of items) for (const k of Object.keys(it)) expect(ALLOWED, `#${it.number} 多了字段 ${k}`).toContain(k);
+    expect(text).not.toMatch(/"body"|"body_cut"|"questions"/);
+    for (const frag of ['说明正文', '要不要换 Key', 'AIzaSy', '长长长长']) expect(text, frag).not.toContain(frag);
   });
 
-  it('PR 没写说明（body 是 null 或空）：不带 body、questions', async () => {
-    const { items } = await prItems([withBody(null), withBody('   ', 9)]);
-    for (const it of items) { expect(it.body).toBeUndefined(); expect(it.questions).toBeUndefined(); }
+  it('本仓库成员开的 PR（OWNER / MEMBER / COLLABORATOR、不是 fork）：不带 external（或 external 不是 true）', async () => {
+    const { text } = await sent([pull(1, { author_association: 'OWNER' }), pull(2, { author_association: 'MEMBER' }), pull(3, { author_association: 'COLLABORATOR' })]);
+    for (const it of JSON.parse(text).blocks[0].payload.items as Record<string, unknown>[]) expect(it.external, `#${it.number}`).not.toBe(true);
   });
 
-  it('正文超过 4000 字：截到 4000 字以内并标 body_cut: true', async () => {
-    const { items } = await prItems([withBody('长'.repeat(9000))]);
-    expect(typeof items[0].body).toBe('string');
-    expect((items[0].body as string).length).toBeLessThanOrEqual(4000);
-    expect((items[0].body as string).length).toBeGreaterThan(1000);
-    expect(items[0].body_cut).toBe(true);
+  it('外部人提交的 PR（CONTRIBUTOR、NONE、FIRST_TIME_CONTRIBUTOR、没写，或来自 fork）：带 external: true，只有标题、链接、开了几天', async () => {
+    const { text } = await sent([
+      pull(4, { author_association: 'CONTRIBUTOR' }), pull(5, { author_association: 'NONE' }), pull(6, { author_association: 'FIRST_TIME_CONTRIBUTOR' }), pull(7, { author_association: undefined }),
+      pull(8, { head: { repo: { full_name: 'someone/fork' } } }), pull(9, { head: { repo: null } }),
+    ]);
+    const items = JSON.parse(text).blocks[0].payload.items as Record<string, unknown>[];
+    expect(items.map((x) => x.number)).toEqual([4, 5, 6, 7, 8, 9]);
+    for (const it of items) {
+      expect(it.external, `#${it.number}`).toBe(true);
+      expect(it).toMatchObject({ title: `【要你决定】样例 ${it.number}`, url: `https://github.com/${REPO}/pull/${it.number}`, days: 1 });
+      for (const k of Object.keys(it)) expect(ALLOWED, `#${it.number} 多了字段 ${k}`).toContain(k);
+    }
   });
 
-  it('100 个 PR、每个正文 9000 字：整份上报仍 ≤ 256 KB，被截的都标 body_cut', async () => {
-    const { items, report } = await prItems(Array.from({ length: 100 }, (_, i) => withBody('正文'.repeat(4500), 100 + i)));
-    expect(items).toHaveLength(100);
-    expect(Buffer.byteLength(JSON.stringify(report))).toBeLessThanOrEqual(256 * 1024);
-    for (const it of items) { if (it.body !== undefined) expect(it.body_cut).toBe(true); }
-    expect(items.filter((it) => typeof it.body === 'string' && (it.body as string).length > 0).length).toBeGreaterThan(0);
+  it('外部人提交的 PR 标题里没有【要你决定】也要报（只给 Amos 看一下）；自己人不带【要你决定】的照旧不报', async () => {
+    const { text } = await sent([pull(10, { title: '改一下 README', author_association: 'NONE' }), pull(11, { title: '修一个错别字', author_association: 'OWNER' })]);
+    const items = JSON.parse(text).blocks[0].payload.items as Record<string, unknown>[];
+    expect(items.map((x) => x.number)).toEqual([10]);
+    expect(items[0]).toMatchObject({ number: 10, title: '改一下 README', external: true });
+    expect(items[0].body).toBeUndefined();
   });
 });
