@@ -1,4 +1,4 @@
-# 公司运营仪表盘上报（agents 产品/marketing/技术方案-运营仪表盘.md 第二、五节）：把本仓库的【要你决定】PR 和 main 的 CI / 最近部署
+# 公司运营仪表盘上报（agents 公司平台/技术方案-运营仪表盘.md 第二、五节）：把本仓库的【要你决定】PR 和 main 的 CI / 最近部署
 # 推到 Marketing 的 /api/company/ingest。脚本 scripts/company-report.mjs（new-forecast、Marketing 两个仓库内容相同，只是 COMPANY_SOURCE 不同）。
 #   - 只在推送到 main、PR 开 / 关 / 重开 / 改标题、main 的 CI（ci.yml，name: ci）跑完时运行；都是事件触发，不设定时任务（Amos B-6）。
 #     CI 跑完再报一次（Amos 2026-11-01）：push 时 CI 多半还在跑，报的是"运行中"；CI 跑完触发 workflow_run，再读一次就是最终结论。
